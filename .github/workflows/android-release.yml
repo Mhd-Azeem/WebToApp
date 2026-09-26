@@ -1,0 +1,59 @@
+name: Build Android Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'android-template/**'
+      - '.github/workflows/android-release.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android-template
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build release APK
+        run: gradle assembleRelease --stacktrace
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/release/app-release-unsigned.apk ../WebToApp-Android-Template.apk
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WebToApp-Android-Template
+          path: WebToApp-Android-Template.apk
+
+      - name: Publish rolling GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-latest
+          name: WebToApp Android Template - Latest
+          prerelease: true
+          make_latest: false
+          files: WebToApp-Android-Template.apk
+          body: |
+            Automated development build of the WebToApp Android template.
+
+            Note: this is currently an unsigned release APK intended to verify the template build pipeline. A permanent signing configuration will be added before production releases.
