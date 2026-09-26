@@ -1,90 +1,102 @@
 package com.webtoapp.template
 
-import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.webkit.CookieManager
-import android.webkit.DownloadListener
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import androidx.activity.OnBackPressedCallback
+import android.widget.Button
+import android.widget.CheckBox
+import android.widget.EditText
+import android.widget.RadioGroup
+import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
-    private lateinit var webView: WebView
-    private lateinit var swipeRefresh: SwipeRefreshLayout
 
-    companion object {
-        private const val HOME_URL = "https://example.com"
-    }
-
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        webView = findViewById(R.id.webView)
-        swipeRefresh = findViewById(R.id.swipeRefresh)
+        val websiteUrl = findViewById<EditText>(R.id.websiteUrl)
+        val appName = findViewById<EditText>(R.id.appName)
+        val packageName = findViewById<EditText>(R.id.packageName)
+        val orientationGroup = findViewById<RadioGroup>(R.id.orientationGroup)
+        val resultText = findViewById<TextView>(R.id.resultText)
 
-        CookieManager.getInstance().apply {
-            setAcceptCookie(true)
-            setAcceptThirdPartyCookies(webView, true)
+        val features = linkedMapOf(
+            "fileUpload" to findViewById<CheckBox>(R.id.featureUpload),
+            "downloads" to findViewById<CheckBox>(R.id.featureDownloads),
+            "camera" to findViewById<CheckBox>(R.id.featureCamera),
+            "microphone" to findViewById<CheckBox>(R.id.featureMicrophone),
+            "location" to findViewById<CheckBox>(R.id.featureLocation),
+            "pullToRefresh" to findViewById<CheckBox>(R.id.featureRefresh),
+            "fullscreenVideo" to findViewById<CheckBox>(R.id.featureFullscreen),
+            "share" to findViewById<CheckBox>(R.id.featureShare),
+            "offlinePage" to findViewById<CheckBox>(R.id.featureOffline)
+        )
+
+        findViewById<Button>(R.id.generateButton).setOnClickListener {
+            val url = normalizeUrl(websiteUrl.text.toString())
+            val name = appName.text.toString().trim()
+            val pkg = packageName.text.toString().trim()
+
+            if (!isValidUrl(url)) {
+                websiteUrl.error = "Enter a valid http or https website URL"
+                return@setOnClickListener
+            }
+            if (name.isBlank()) {
+                appName.error = "Enter an app name"
+                return@setOnClickListener
+            }
+            if (!pkg.matches(Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"))) {
+                packageName.error = "Example: com.company.app"
+                return@setOnClickListener
+            }
+
+            val orientation = when (orientationGroup.checkedRadioButtonId) {
+                R.id.orientationPortrait -> "portrait"
+                R.id.orientationLandscape -> "landscape"
+                else -> "auto"
+            }
+
+            val featureJson = JSONObject()
+            features.forEach { (key, box) -> featureJson.put(key, box.isChecked) }
+
+            val config = JSONObject().apply {
+                put("appName", name)
+                put("packageName", pkg)
+                put("websiteUrl", url)
+                put("orientation", orientation)
+                put("features", featureJson)
+            }
+
+            resultText.text = config.toString(2)
+            Toast.makeText(this, "Configuration generated", Toast.LENGTH_SHORT).show()
         }
 
-        webView.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            databaseEnabled = true
-            loadsImagesAutomatically = true
-            useWideViewPort = true
-            loadWithOverviewMode = true
-            builtInZoomControls = false
-            displayZoomControls = false
-            mediaPlaybackRequiresUserGesture = false
-        }
-
-        webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                val uri = request.url
-                return when (uri.scheme?.lowercase()) {
-                    "http", "https" -> false
-                    else -> {
-                        runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
-                        true
-                    }
+        findViewById<Button>(R.id.previewButton).setOnClickListener {
+            val url = normalizeUrl(websiteUrl.text.toString())
+            if (!isValidUrl(url)) {
+                websiteUrl.error = "Enter a valid website URL"
+            } else {
+                runCatching {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                }.onFailure {
+                    Toast.makeText(this, "Unable to open website", Toast.LENGTH_SHORT).show()
                 }
             }
-
-            override fun onPageFinished(view: WebView, url: String) {
-                swipeRefresh.isRefreshing = false
-            }
         }
-        webView.webChromeClient = WebChromeClient()
-
-        swipeRefresh.setOnRefreshListener { webView.reload() }
-        webView.setOnScrollChangeListener { _, _, scrollY, _, _ ->
-            swipeRefresh.isEnabled = scrollY == 0
-        }
-
-        webView.setDownloadListener(DownloadListener { url, _, _, _, _ ->
-            runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-        })
-
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                if (webView.canGoBack()) webView.goBack() else finish()
-            }
-        })
-
-        if (savedInstanceState == null) webView.loadUrl(HOME_URL) else webView.restoreState(savedInstanceState)
     }
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        webView.saveState(outState)
-        super.onSaveInstanceState(outState)
+    private fun normalizeUrl(value: String): String {
+        val trimmed = value.trim()
+        if (trimmed.isBlank()) return trimmed
+        return if (trimmed.startsWith("http://", true) || trimmed.startsWith("https://", true)) trimmed else "https://$trimmed"
+    }
+
+    private fun isValidUrl(value: String): Boolean {
+        val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return false
+        return (uri.scheme == "http" || uri.scheme == "https") && !uri.host.isNullOrBlank()
     }
 }
