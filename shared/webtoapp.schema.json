@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WebToApp Project Configuration",
+  "type": "object",
+  "required": ["appName", "packageName", "websiteUrl"],
+  "properties": {
+    "appName": { "type": "string", "minLength": 1 },
+    "packageName": {
+      "type": "string",
+      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+$"
+    },
+    "websiteUrl": { "type": "string", "format": "uri" },
+    "orientation": {
+      "type": "string",
+      "enum": ["auto", "portrait", "landscape"],
+      "default": "auto"
+    },
+    "theme": {
+      "type": "object",
+      "properties": {
+        "primaryColor": { "type": "string", "default": "#0D47A1" },
+        "darkMode": { "type": "boolean", "default": false }
+      },
+      "additionalProperties": false
+    },
+    "features": {
+      "type": "object",
+      "properties": {
+        "fileUpload": { "type": "boolean", "default": true },
+        "downloads": { "type": "boolean", "default": true },
+        "camera": { "type": "boolean", "default": true },
+        "microphone": { "type": "boolean", "default": true },
+        "location": { "type": "boolean", "default": false },
+        "pullToRefresh": { "type": "boolean", "default": true },
+        "offlinePage": { "type": "boolean", "default": true },
+        "fullscreenVideo": { "type": "boolean", "default": true },
+        "share": { "type": "boolean", "default": true },
+        "externalLinks": { "type": "boolean", "default": true },
+        "autoUpdate": { "type": "boolean", "default": false }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
