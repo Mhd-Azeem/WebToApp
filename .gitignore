@@ -1,0 +1,28 @@
+# Android / Gradle
+.gradle/
+**/build/
+local.properties
+*.apk
+*.aab
+*.jks
+*.keystore
+
+# IntelliJ / Android Studio
+.idea/
+*.iml
+
+# Python / Windows builder
+__pycache__/
+*.pyc
+.venv/
+venv/
+dist/
+build/
+*.spec
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
