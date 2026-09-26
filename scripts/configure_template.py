@@ -1,9 +1,8 @@
-import argparse
+import argparse,re
 from pathlib import Path
-
 p=argparse.ArgumentParser(); p.add_argument('--url',required=True); p.add_argument('--name',required=True); p.add_argument('--package',required=True); p.add_argument('--orientation',choices=['auto','portrait','landscape'],default='auto'); a=p.parse_args()
 root=Path(__file__).resolve().parents[1]/'android-template'; src=root/'app/src/main'; main=src/'java/com/webtoapp/template/MainActivity.kt'; layout=src/'res/layout/activity_main.xml'; manifest=src/'AndroidManifest.xml'; gradle=root/'app/build.gradle.kts'
-url=a.url.replace('"',''); name=a.name.replace('"',''); pkg=a.package
+url=a.url.replace('"',''); name=a.name.replace('"',''); pkg=a.package; orientation={'auto':'unspecified','portrait':'portrait','landscape':'landscape'}[a.orientation]
 main.write_text(f'''package com.webtoapp.template
 import android.annotation.SuppressLint
 import android.os.Bundle
@@ -21,5 +20,5 @@ class MainActivity:AppCompatActivity(){{
 }}
 ''')
 layout.write_text('''<?xml version="1.0" encoding="utf-8"?><androidx.swiperefreshlayout.widget.SwipeRefreshLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/swipeRefresh" android:layout_width="match_parent" android:layout_height="match_parent"><WebView android:id="@+id/webView" android:layout_width="match_parent" android:layout_height="match_parent" /></androidx.swiperefreshlayout.widget.SwipeRefreshLayout>''')
-s=manifest.read_text(); import re; s=re.sub(r'android:label="[^"]*"',f'android:label="{name}"',s); s=re.sub(r'android:screenOrientation="[^"]*"',f'android:screenOrientation="{{"auto":"unspecified","portrait":"portrait","landscape":"landscape"}}[a.orientation]"',s); manifest.write_text(s)
+s=manifest.read_text(); s=re.sub(r'android:label="[^"]*"',f'android:label="{name}"',s); s=re.sub(r'android:screenOrientation="[^"]*"',f'android:screenOrientation="{orientation}"',s); manifest.write_text(s)
 s=gradle.read_text(); s=re.sub(r'applicationId = "[^"]*"',f'applicationId = "{pkg}"',s); gradle.write_text(s)
