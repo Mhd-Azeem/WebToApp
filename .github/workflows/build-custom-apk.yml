@@ -1,0 +1,56 @@
+name: Build Custom Website APK
+on:
+  workflow_dispatch:
+    inputs:
+      website_url:
+        description: Website URL
+        required: true
+        default: https://example.com
+      app_name:
+        description: App name
+        required: true
+        default: My Web App
+      package_name:
+        description: Android package name
+        required: true
+        default: com.example.mywebapp
+      orientation:
+        description: Orientation
+        required: true
+        type: choice
+        options: [auto, portrait, landscape]
+        default: auto
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Configure generated app
+        run: python3 scripts/configure_template.py --url '${{ inputs.website_url }}' --name '${{ inputs.app_name }}' --package '${{ inputs.package_name }}' --orientation '${{ inputs.orientation }}'
+      - name: Build signed debug APK
+        working-directory: android-template
+        run: gradle assembleDebug --stacktrace
+      - name: Prepare APK
+        run: cp android-template/app/build/outputs/apk/debug/app-debug.apk "${{ inputs.app_name }}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-apk
+          path: '*.apk'
+      - name: Publish generated APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: generated-latest
+          name: Generated Website App - Latest
+          prerelease: true
+          make_latest: false
+          files: '*.apk'
+          body: Generated from WebToApp Builder inputs. Development-signed build for direct testing.
