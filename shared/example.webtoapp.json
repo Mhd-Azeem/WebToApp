@@ -1,0 +1,23 @@
+{
+  "appName": "Example App",
+  "packageName": "com.example.webapp",
+  "websiteUrl": "https://example.com",
+  "orientation": "auto",
+  "theme": {
+    "primaryColor": "#0D47A1",
+    "darkMode": false
+  },
+  "features": {
+    "fileUpload": true,
+    "downloads": true,
+    "camera": true,
+    "microphone": true,
+    "location": false,
+    "pullToRefresh": true,
+    "offlinePage": true,
+    "fullscreenVideo": true,
+    "share": true,
+    "externalLinks": true,
+    "autoUpdate": false
+  }
+}
