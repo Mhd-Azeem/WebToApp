@@ -1,0 +1,1 @@
+# WebToApp template ProGuard rules.
