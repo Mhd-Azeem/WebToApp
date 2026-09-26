@@ -33,11 +33,11 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build release APK
-        run: gradle assembleRelease --stacktrace
+      - name: Build installable APK
+        run: gradle assembleDebug --stacktrace
 
-      - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release-unsigned.apk ../WebToApp-Android-Template.apk
+      - name: Rename signed APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk ../WebToApp-Android-Template.apk
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -54,6 +54,5 @@ jobs:
           make_latest: false
           files: WebToApp-Android-Template.apk
           body: |
-            Automated development build of the WebToApp Android template.
-
-            Note: this is currently an unsigned release APK intended to verify the template build pipeline. A permanent signing configuration will be added before production releases.
+            Automated installable development build of the WebToApp Android template.
+            This build uses Android's standard debug signing so it can be installed for testing.
