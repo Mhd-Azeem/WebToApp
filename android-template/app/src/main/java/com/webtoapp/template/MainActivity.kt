@@ -3,16 +3,25 @@ package com.webtoapp.template
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.widget.Button
-import android.widget.CheckBox
-import android.widget.EditText
-import android.widget.RadioGroup
-import android.widget.TextView
-import android.widget.Toast
+import android.os.Handler
+import android.os.Looper
+import android.text.InputType
+import android.view.View
+import android.widget.*
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
+    private val owner = "Mhd-Azeem"
+    private val repo = "WebToApp"
+    private val workflow = "build-custom-apk.yml"
+    private val prefs by lazy { getSharedPreferences("webtoapp", MODE_PRIVATE) }
+    private val handler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -22,81 +31,156 @@ class MainActivity : AppCompatActivity() {
         val appName = findViewById<EditText>(R.id.appName)
         val packageName = findViewById<EditText>(R.id.packageName)
         val orientationGroup = findViewById<RadioGroup>(R.id.orientationGroup)
-        val resultText = findViewById<TextView>(R.id.resultText)
+        val build = findViewById<Button>(R.id.buildButton)
+        val status = findViewById<TextView>(R.id.statusText)
+        val progress = findViewById<ProgressBar>(R.id.progressBar)
 
-        val features = linkedMapOf(
-            "fileUpload" to findViewById<CheckBox>(R.id.featureUpload),
-            "downloads" to findViewById<CheckBox>(R.id.featureDownloads),
-            "camera" to findViewById<CheckBox>(R.id.featureCamera),
-            "microphone" to findViewById<CheckBox>(R.id.featureMicrophone),
-            "location" to findViewById<CheckBox>(R.id.featureLocation),
-            "pullToRefresh" to findViewById<CheckBox>(R.id.featureRefresh),
-            "fullscreenVideo" to findViewById<CheckBox>(R.id.featureFullscreen),
-            "share" to findViewById<CheckBox>(R.id.featureShare),
-            "offlinePage" to findViewById<CheckBox>(R.id.featureOffline)
-        )
-
-        findViewById<Button>(R.id.generateButton).setOnClickListener {
-            val url = normalizeUrl(websiteUrl.text.toString())
-            val name = appName.text.toString().trim()
-            val pkg = packageName.text.toString().trim()
-
-            if (!isValidUrl(url)) {
-                websiteUrl.error = "Enter a valid http or https website URL"
-                return@setOnClickListener
-            }
-            if (name.isBlank()) {
-                appName.error = "Enter an app name"
-                return@setOnClickListener
-            }
-            if (!pkg.matches(Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"))) {
-                packageName.error = "Example: com.company.app"
-                return@setOnClickListener
-            }
-
-            val orientation = when (orientationGroup.checkedRadioButtonId) {
-                R.id.orientationPortrait -> "portrait"
-                R.id.orientationLandscape -> "landscape"
-                else -> "auto"
-            }
-
-            val featureJson = JSONObject()
-            features.forEach { (key, box) -> featureJson.put(key, box.isChecked) }
-
-            val config = JSONObject().apply {
-                put("appName", name)
-                put("packageName", pkg)
-                put("websiteUrl", url)
-                put("orientation", orientation)
-                put("features", featureJson)
-            }
-
-            resultText.text = config.toString(2)
-            Toast.makeText(this, "Configuration generated", Toast.LENGTH_SHORT).show()
+        findViewById<Button>(R.id.githubButton).setOnClickListener { askForToken() }
+        findViewById<Button>(R.id.previewButton).setOnClickListener {
+            val u = normalizeUrl(websiteUrl.text.toString())
+            if (!isValidUrl(u)) websiteUrl.error = "Enter a valid website URL"
+            else startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u)))
         }
 
-        findViewById<Button>(R.id.previewButton).setOnClickListener {
-            val url = normalizeUrl(websiteUrl.text.toString())
-            if (!isValidUrl(url)) {
-                websiteUrl.error = "Enter a valid website URL"
-            } else {
-                runCatching {
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                }.onFailure {
-                    Toast.makeText(this, "Unable to open website", Toast.LENGTH_SHORT).show()
+        build.setOnClickListener {
+            val u = normalizeUrl(websiteUrl.text.toString())
+            val n = appName.text.toString().trim()
+            val p = packageName.text.toString().trim()
+            val token = prefs.getString("github_token", null)
+
+            when {
+                !isValidUrl(u) -> websiteUrl.error = "Enter a valid http/https URL"
+                n.isBlank() -> appName.error = "Enter an app name"
+                !p.matches(Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$")) ->
+                    packageName.error = "Example: com.company.app"
+                token.isNullOrBlank() -> askForToken()
+                else -> {
+                    val orientation = when (orientationGroup.checkedRadioButtonId) {
+                        R.id.orientationPortrait -> "portrait"
+                        R.id.orientationLandscape -> "landscape"
+                        else -> "auto"
+                    }
+                    build.isEnabled = false
+                    progress.visibility = View.VISIBLE
+                    status.text = "Starting APK build…"
+                    dispatchBuild(token, u, n, p, orientation, build, progress, status)
                 }
             }
         }
     }
 
-    private fun normalizeUrl(value: String): String {
-        val trimmed = value.trim()
-        if (trimmed.isBlank()) return trimmed
-        return if (trimmed.startsWith("http://", true) || trimmed.startsWith("https://", true)) trimmed else "https://$trimmed"
+    private fun askForToken() {
+        val input = EditText(this).apply {
+            hint = "GitHub token"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setPadding(48, 20, 48, 20)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Connect GitHub")
+            .setMessage("Enter a fine-grained GitHub token with Actions write access to Mhd-Azeem/WebToApp. It is stored only on this device.")
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                val value = input.text.toString().trim()
+                if (value.isNotEmpty()) {
+                    prefs.edit().putString("github_token", value).apply()
+                    Toast.makeText(this, "GitHub connected", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
-    private fun isValidUrl(value: String): Boolean {
-        val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return false
-        return (uri.scheme == "http" || uri.scheme == "https") && !uri.host.isNullOrBlank()
+    private fun dispatchBuild(token:String, site:String, name:String, pkg:String, orientation:String,
+                              button:Button, progress:ProgressBar, status:TextView) {
+        thread {
+            try {
+                val body = JSONObject().apply {
+                    put("ref", "main")
+                    put("inputs", JSONObject().apply {
+                        put("website_url", site)
+                        put("app_name", name)
+                        put("package_name", pkg)
+                        put("orientation", orientation)
+                    })
+                }.toString()
+                val code = request(
+                    "https://api.github.com/repos/$owner/$repo/actions/workflows/$workflow/dispatches",
+                    "POST", token, body
+                ).first
+                if (code !in 200..299) throw Exception("GitHub returned HTTP $code")
+                ui { status.text = "Build queued on GitHub Actions…" }
+                Thread.sleep(5000)
+                pollBuild(token, name, button, progress, status)
+            } catch (e:Exception) {
+                ui {
+                    status.text = "Build could not start: ${e.message}"
+                    progress.visibility = View.GONE
+                    button.isEnabled = true
+                }
+            }
+        }
+    }
+
+    private fun pollBuild(token:String, appName:String, button:Button, progress:ProgressBar, status:TextView) {
+        repeat(90) {
+            val (_, text) = request(
+                "https://api.github.com/repos/$owner/$repo/actions/workflows/$workflow/runs?event=workflow_dispatch&per_page=1",
+                "GET", token, null
+            )
+            val runs = JSONObject(text).optJSONArray("workflow_runs")
+            if (runs != null && runs.length() > 0) {
+                val run = runs.getJSONObject(0)
+                val state = run.optString("status")
+                val conclusion = run.optString("conclusion")
+                ui { status.text = if (state == "completed") "Build finished: $conclusion" else "Building APK… $state" }
+                if (state == "completed") {
+                    ui {
+                        progress.visibility = View.GONE
+                        button.isEnabled = true
+                        if (conclusion == "success") {
+                            status.text = "APK ready. Opening download…"
+                            val encoded = URLEncoder.encode(appName, "UTF-8").replace("+", "%20")
+                            startActivity(Intent(Intent.ACTION_VIEW,
+                                Uri.parse("https://github.com/$owner/$repo/releases/download/generated-latest/$encoded.apk")))
+                        } else status.text = "APK build failed. Check GitHub Actions."
+                    }
+                    return
+                }
+            }
+            Thread.sleep(5000)
+        }
+        ui {
+            progress.visibility = View.GONE
+            button.isEnabled = true
+            status.text = "Build is taking longer than expected. Check GitHub Actions."
+        }
+    }
+
+    private fun request(endpoint:String, method:String, token:String, body:String?): Pair<Int,String> {
+        val c = URL(endpoint).openConnection() as HttpURLConnection
+        c.requestMethod = method
+        c.setRequestProperty("Authorization", "Bearer $token")
+        c.setRequestProperty("Accept", "application/vnd.github+json")
+        c.setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+        c.connectTimeout = 15000
+        c.readTimeout = 15000
+        if (body != null) {
+            c.doOutput = true
+            c.setRequestProperty("Content-Type", "application/json")
+            c.outputStream.use { it.write(body.toByteArray()) }
+        }
+        val code = c.responseCode
+        val stream = if (code in 200..299) c.inputStream else c.errorStream
+        return code to (stream?.bufferedReader()?.use { it.readText() } ?: "")
+    }
+
+    private fun ui(block:()->Unit) = handler.post(block)
+    private fun normalizeUrl(v:String):String {
+        val s=v.trim()
+        return if (s.startsWith("http://",true)||s.startsWith("https://",true)) s else "https://$s"
+    }
+    private fun isValidUrl(v:String):Boolean {
+        val u=runCatching { Uri.parse(v) }.getOrNull() ?: return false
+        return (u.scheme=="http"||u.scheme=="https") && !u.host.isNullOrBlank()
     }
 }
