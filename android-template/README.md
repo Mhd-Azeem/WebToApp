@@ -17,3 +17,5 @@ Target capabilities:
 - pull-to-refresh
 - share and external-link routing
 - modular optional features
+
+Build baseline refreshed for the WebToApp Android builder.
