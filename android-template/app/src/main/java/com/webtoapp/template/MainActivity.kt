@@ -1,6 +1,8 @@
 package com.webtoapp.template
 
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -8,6 +10,12 @@ import android.os.Looper
 import android.text.InputType
 import android.view.View
 import android.widget.*
+import android.util.Base64
+import com.canhub.cropper.CropImageContract
+import com.canhub.cropper.CropImageContractOptions
+import com.canhub.cropper.CropImageOptions
+import com.canhub.cropper.Guidelines
+import java.io.ByteArrayOutputStream
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONObject
@@ -22,6 +30,22 @@ class MainActivity : AppCompatActivity() {
     private val workflow = "build-custom-apk.yml"
     private val prefs by lazy { getSharedPreferences("webtoapp", MODE_PRIVATE) }
     private val handler = Handler(Looper.getMainLooper())
+    private var iconBase64 = ""
+    private val cropIcon = registerForActivityResult(CropImageContract()) { result ->
+        if (result.isSuccessful && result.uriContent != null) {
+            val uri = result.uriContent!!
+            thread {
+                try {
+                    val bitmap = contentResolver.openInputStream(uri).use { BitmapFactory.decodeStream(it) }
+                    val scaled = Bitmap.createScaledBitmap(bitmap, 192, 192, true)
+                    val out = ByteArrayOutputStream()
+                    scaled.compress(Bitmap.CompressFormat.JPEG, 82, out)
+                    iconBase64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+                    ui { findViewById<ImageView>(R.id.iconPreview).setImageBitmap(scaled); Toast.makeText(this, "Icon cropped and ready", Toast.LENGTH_SHORT).show() }
+                } catch (e: Exception) { ui { Toast.makeText(this, "Could not process icon", Toast.LENGTH_SHORT).show() } }
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,6 +60,9 @@ class MainActivity : AppCompatActivity() {
         val progress = findViewById<ProgressBar>(R.id.progressBar)
 
         findViewById<Button>(R.id.githubButton).setOnClickListener { askForToken() }
+        findViewById<Button>(R.id.iconButton).setOnClickListener {
+            cropIcon.launch(CropImageContractOptions(null, CropImageOptions(fixAspectRatio = true, aspectRatioX = 1, aspectRatioY = 1, guidelines = Guidelines.ON)))
+        }
         findViewById<Button>(R.id.previewButton).setOnClickListener {
             val u = normalizeUrl(websiteUrl.text.toString())
             if (!isValidUrl(u)) websiteUrl.error = "Enter a valid website URL"
@@ -101,6 +128,7 @@ class MainActivity : AppCompatActivity() {
                         put("app_name", name)
                         put("package_name", pkg)
                         put("orientation", orientation)
+                        put("icon_base64", iconBase64)
                     })
                 }.toString()
                 val code = request(
