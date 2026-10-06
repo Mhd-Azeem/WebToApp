@@ -69,7 +69,12 @@ class MainActivity : AppCompatActivity() {
                 aspectRatioY = 1,
                 imageSourceIncludeGallery = true,
                 imageSourceIncludeCamera = true,
-                cropMenuCropButtonTitle = "DONE"
+                cropMenuCropButtonTitle = "ADD PHOTO",
+                activityMenuIconColor = android.graphics.Color.BLACK,
+                toolbarColor = android.graphics.Color.WHITE,
+                toolbarBackButtonColor = android.graphics.Color.BLACK,
+                toolbarTintColor = android.graphics.Color.BLACK,
+                toolbarTitleColor = android.graphics.Color.BLACK
             )))
         }
         findViewById<Button>(R.id.previewButton).setOnClickListener {
