@@ -14,6 +14,10 @@ on:
         description: Android package name
         required: true
         default: com.example.mywebapp
+      icon_base64:
+        description: Cropped app icon data
+        required: false
+        default: ''
       orientation:
         description: Orientation
         required: true
@@ -35,7 +39,7 @@ jobs:
         with:
           gradle-version: '8.9'
       - name: Configure generated app
-        run: python3 scripts/configure_template.py --url '${{ inputs.website_url }}' --name '${{ inputs.app_name }}' --package '${{ inputs.package_name }}' --orientation '${{ inputs.orientation }}'
+        run: python3 scripts/configure_template.py --url '${{ inputs.website_url }}' --name '${{ inputs.app_name }}' --package '${{ inputs.package_name }}' --orientation '${{ inputs.orientation }}' --icon-base64 '${{ inputs.icon_base64 }}'
       - name: Build signed debug APK
         working-directory: android-template
         run: gradle assembleDebug --stacktrace
