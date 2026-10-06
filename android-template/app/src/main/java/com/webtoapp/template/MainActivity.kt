@@ -1,6 +1,8 @@
 package com.webtoapp.template
 
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.Manifest
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -14,6 +16,7 @@ import android.util.Base64
 import com.canhub.cropper.CropImageContract
 import com.canhub.cropper.CropImageContractOptions
 import com.canhub.cropper.CropImageOptions
+import com.canhub.cropper.CropImageView
 import java.io.ByteArrayOutputStream
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -60,7 +63,14 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.githubButton).setOnClickListener { askForToken() }
         findViewById<Button>(R.id.iconButton).setOnClickListener {
-            cropIcon.launch(CropImageContractOptions(null, CropImageOptions(fixAspectRatio = true, aspectRatioX = 1, aspectRatioY = 1)))
+            cropIcon.launch(CropImageContractOptions(null, CropImageOptions(
+                fixAspectRatio = true,
+                aspectRatioX = 1,
+                aspectRatioY = 1,
+                imageSourceIncludeGallery = true,
+                imageSourceIncludeCamera = true,
+                cropMenuCropButtonTitle = "DONE"
+            )))
         }
         findViewById<Button>(R.id.previewButton).setOnClickListener {
             val u = normalizeUrl(websiteUrl.text.toString())
