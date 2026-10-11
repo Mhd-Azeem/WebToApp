@@ -1,0 +1,14 @@
+{
+  "assets": [
+    {
+      "file": "textures/asphalt.png",
+      "creator": "Lennart Demes / ambientCG",
+      "source": "https://ambientcg.com/view?id=Asphalt012",
+      "download": "https://ambientcg.com/get?file=Asphalt012_1K-JPG.zip",
+      "license": "CC0-1.0",
+      "license_url": "https://docs.ambientcg.com/license/",
+      "modifications": "Color map resized to 512x512 and converted to PNG",
+      "sha256": "959b61f5e12c56f8b1379e0dbb738261e725520377ee569f92025c92d1fb5568"
+    }
+  ]
+}
