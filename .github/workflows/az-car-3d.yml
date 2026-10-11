@@ -1,0 +1,44 @@
+name: AZ Car 3D Android APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/az-car-3d]
+    paths:
+      - 'games/AZ-Car-3D/**'
+      - '.github/workflows/az-car-3d.yml'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Godot 4.3 and export templates
+        run: |
+          wget -q https://github.com/godotengine/godot-builds/releases/download/4.3-stable/Godot_v4.3-stable_linux.x86_64.zip
+          unzip -q Godot_v4.3-stable_linux.x86_64.zip
+          chmod +x Godot_v4.3-stable_linux.x86_64
+          wget -q https://github.com/godotengine/godot-builds/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz
+          mkdir -p ~/.local/share/godot/export_templates/4.3.stable
+          unzip -q Godot_v4.3-stable_export_templates.tpz -d /tmp/godot_templates
+          cp /tmp/godot_templates/templates/* ~/.local/share/godot/export_templates/4.3.stable/
+      - name: Configure Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Configure Godot Android SDK
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+        run: |
+          mkdir -p ~/.config/godot
+          printf '[gd_resource type="EditorSettings" format=3]\n[resource]\nexport/android/android_sdk_path = "%s"\n' "$ANDROID_HOME" > ~/.config/godot/editor_settings-4.3.tres
+      - name: Import project and validate scripts
+        run: |
+          ./Godot_v4.3-stable_linux.x86_64 --headless --path games/AZ-Car-3D --editor --import --quit
+      - name: Build Android debug APK
+        run: |
+          mkdir -p games/AZ-Car-3D/build
+          ./Godot_v4.3-stable_linux.x86_64 --headless --path games/AZ-Car-3D --export-debug Android build/AZ-Car-3D-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AZ-Car-3D-debug-APK
+          path: games/AZ-Car-3D/build/*.apk
+          if-no-files-found: error
