@@ -31,6 +31,14 @@ itself supplies min 24 / target 35. Enable ETC2/ASTC imports for Android.
 The exporter emits an adb-daemon connection warning in this container; export
 and independent APK signature checks succeed. No Android device is attached.
 
+## GitHub verification
+
+Run 38180480139 at f89b2fbe7dbc31278c055df45001c41fba1bd74f completed
+successfully: imports, gameplay tests, Android APK export and signature validation.
+Its logs exposed a fallback-icon diagnostic. The follow-up adds an original SVG
+application icon and strengthens explicit error-log checks (shell negation under
+`set -e` was insufficient). No engine/gameplay behavior was changed by that fix.
+
 ## Outstanding validation / limitations
 
 No Android installation, Nubia V70 Max frame-time/thermal/memory profiling,

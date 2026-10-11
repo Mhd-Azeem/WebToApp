@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+<rect width="512" height="512" rx="100" fill="#102c3d"/>
+<path d="M106 284 147 189Q156 171 179 171H335Q357 171 366 191L407 284V374H106Z" fill="#51b8ca"/>
+<path d="M165 207H348L376 272H135Z" fill="#183b52"/>
+<rect x="126" y="301" width="61" height="27" rx="9" fill="#ffebac"/>
+<rect x="326" y="301" width="61" height="27" rx="9" fill="#ffebac"/>
+<rect x="132" y="355" width="51" height="37" rx="12" fill="#061721"/>
+<rect x="330" y="355" width="51" height="37" rx="12" fill="#061721"/>
+<path d="M207 340H307" stroke="#183b52" stroke-width="15"/>
+<text x="256" y="123" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="67" fill="white">AZ CAR</text>
+<path d="M229 417H283" stroke="#fce4a1" stroke-width="9" stroke-linecap="round"/>
+<path d="M229 449H283" stroke="#fce4a1" stroke-width="9" stroke-linecap="round"/>
+</svg>
