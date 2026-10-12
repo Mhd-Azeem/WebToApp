@@ -93,7 +93,33 @@ Future coastal district",Vector3(96,5,181),25).rotation.y=PI
 	_batch_geometry(landscape)
 	_batch_geometry(extension)
 	landmark_count = 4
+	_urban_details()
 	_batch_geometry()
+
+func _urban_details() -> void:
+	var metal := G.material("",Color(0.13,0.17,0.19))
+	var paint := G.material("",Color(0.92,0.93,0.89))
+	for x in STREET_X:
+		for z in STREET_Z:
+			var signals := Node3D.new()
+			signals.position=Vector3(x,0,z)
+			signals.set_script(preload("res://scripts/traffic_signal.gd"))
+			add_child(signals)
+		for side in [-1.0,1.0]:
+			for z in range(-150,151,8):
+				if _junction(float(z)): continue
+				G.box(self,Vector3(x+side*3.7,0.018,z),Vector3(0.09,0.015,4),paint)
+	# Shelters and parking stay off the existing connected road surfaces.
+	for pos in [Vector3(12,0,115),Vector3(-84,0,-115),Vector3(108,0,35)]:
+		for x in [-2.0,2.0]:
+			for z in [-0.8,0.8]: G.box(self,pos+Vector3(x,1.3,z),Vector3(0.06,2.6,0.06),metal)
+		G.box(self,pos+Vector3(0,2.65,0),Vector3(4.8,0.09,2.2),G.material("",Color(0.22,0.38,0.43)))
+		G.box(self,pos+Vector3(0,0.5,0.6),Vector3(3.7,0.09,0.38),metal)
+		var sign := G.label(self,"BUS • COLOMBO",pos+Vector3(0,2.35,-0.85),22)
+		sign.pixel_size=0.006
+	for x in range(22,67,5):
+		G.box(self,Vector3(x,0.025,92),Vector3(0.10,0.015,6),paint)
+	G.box(self,Vector3(44,0.025,95),Vector3(45,0.015,0.1),paint)
 
 func _junction(z: float) -> bool:
 	for cross in STREET_Z:

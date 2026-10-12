@@ -1,9 +1,9 @@
 extends RefCounted
-static var traffic_template: PackedScene
+static var traffic_templates := {}
 
-static func traffic_model(parent: Node3D,color: Color) -> Node3D:
-	if traffic_template!=null:
-		var copy := traffic_template.instantiate() as Node3D
+static func traffic_model(parent: Node3D,color: Color,kind := "sedan") -> Node3D:
+	if traffic_templates.has(kind):
+		var copy := traffic_templates[kind].instantiate() as Node3D
 		parent.add_child(copy)
 		var paint := G.material("",color)
 		paint.metallic=0.65
@@ -11,7 +11,7 @@ static func traffic_model(parent: Node3D,color: Color) -> Node3D:
 		for node in copy.find_children("*","MeshInstance3D",true,false):
 			if node.has_meta("body_paint"): node.material_override=paint
 		return copy
-	var model := build(parent,color)
+	var model := build(parent,color,kind)
 	for x in [-0.94,0.94]:
 		for z in [-1.3,1.3]:
 			var wheel_root := Node3D.new()
@@ -20,8 +20,9 @@ static func traffic_model(parent: Node3D,color: Color) -> Node3D:
 			wheel(wheel_root,x)
 	merge_static(model)
 	for node in model.find_children("*","",true,false): node.owner=model
-	traffic_template=PackedScene.new()
-	traffic_template.pack(model)
+	var template := PackedScene.new()
+	template.pack(model)
+	traffic_templates[kind]=template
 	return model
 
 static func merge_static(root: Node3D) -> void:
@@ -63,7 +64,7 @@ static func merge_static(root: Node3D) -> void:
 		root.add_child(merged)
 # Shared original coupe artwork for player and traffic.
 const G = preload("res://scripts/geometry.gd")
-static func build(parent: Node3D, color: Color) -> Node3D:
+static func build(parent: Node3D, color: Color,kind := "sedan") -> Node3D:
 	var visual := Node3D.new()
 	parent.add_child(visual)
 	# Original performance-coupe geometry: long sculpted hood, sloped glass,
@@ -80,8 +81,22 @@ static func build(parent: Node3D, color: Color) -> Node3D:
 	var glass := G.material("",Color(0.055,0.10,0.135))
 	glass.metallic=0.2
 	glass.roughness=0.16
-	G.profile_mesh(visual,[[-1.39,0.81,1.00,1.08],[-0.86,0.70,1.01,1.43],[0.10,0.71,1.01,1.44],[0.99,0.83,1.0,1.08]],glass)
-	G.profile_mesh(visual,[[-0.89,0.69,1.41,1.47],[-0.67,0.70,1.42,1.48],[-0.08,0.70,1.42,1.48],[0.16,0.68,1.41,1.47]],paint)
+	var height := 1.44
+	var rear := -0.86
+	if kind=="hatchback": rear=-1.65
+	elif kind=="suv": height=1.78; rear=-1.65
+	elif kind=="van": height=2.02; rear=-1.90
+	elif kind=="bus": height=2.25; rear=-1.95
+	G.profile_mesh(visual,[[-2.0,0.81,1.0,1.08],[rear,0.70,1.01,height],[0.10,0.71,1.01,height],[0.99,0.83,1.0,1.08]],glass)
+	G.profile_mesh(visual,[[rear,0.69,height-0.03,height+0.03],[rear+0.15,0.70,height-0.02,height+0.04],[0.10,0.70,height-0.02,height+0.04],[0.18,0.68,height-0.03,height+0.03]],paint)
+	for z in [rear+0.12,-0.50,0.12]:
+		for side in [-1,1]:
+			G.box(visual,Vector3(side*0.71,(height+1.01)*0.5,z),Vector3(0.045,height-1.0,0.055),paint)
+	if kind in ["van","bus"]:
+		G.profile_mesh(visual,[[-2.12,0.82,0.9,height],[-1.94,0.82,0.9,height]],paint)
+		for side in [-1,1]:
+			G.box(visual,Vector3(side*0.75,1.4,-2.14),Vector3(0.10,0.40,0.04),G.material("",Color(0.7,0.025,0.03)))
+	if kind=="bus": visual.scale=Vector3(1.15,1.10,1.45)
 	for side in [-1.0,1.0]:
 		G.box(visual,Vector3(side*0.94,0.51,-0.1),Vector3(0.12,0.09,2.65),trim)
 		G.box(visual,Vector3(side*0.83,1.24,-0.60),Vector3(0.055,0.43,0.08),paint)

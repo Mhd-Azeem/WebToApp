@@ -12,6 +12,9 @@ func _initialize() -> void:
 func world_test() -> void:
 	var scene = load("res://scenes/main.tscn").instantiate()
 	root.add_child(scene)
+	scene.desktop_mode=false
+	for pedal in scene.pedals.values(): pedal.visible=true
+	for button in scene.touch_buttons: button.visible=true
 	scene.car.transmission.mode=T.Mode.MANUAL
 	await physics_frame
 	await physics_frame
@@ -27,12 +30,12 @@ func world_test() -> void:
 		touch.pressed=true
 		root.push_input(touch,true)
 	await process_frame
-	check(scene.car.gas==1 and scene.car.turn==1 and scene.car.clutch_pedal==1,"Simultaneous native touches")
+	check(scene.car.gas==0.25 and scene.car.turn==1 and scene.car.clutch_pedal==1,"Simultaneous native touches")
 	var pedal_drag := InputEventScreenDrag.new()
 	pedal_drag.index=3
-	pedal_drag.position=Vector2(1170,658)
+	pedal_drag.position=Vector2(1170,578)
 	root.push_input(pedal_drag,true)
-	check(absf(scene.car.gas-0.5)<0.01 and scene.car.clutch_pedal==1,"Analog gas drag independently reaches 50 percent")
+	check(absf(scene.car.gas-0.5)<0.01 and scene.car.clutch_pedal==1,"Progressive gas drag independently reaches 50 percent")
 	pedal_drag.position=Vector2(1170,610)
 	root.push_input(pedal_drag,true)
 	var brake_touch := InputEventScreenTouch.new()
@@ -43,7 +46,7 @@ func world_test() -> void:
 	pedal_drag.index=5
 	pedal_drag.position=Vector2(1040,682)
 	root.push_input(pedal_drag,true)
-	check(absf(scene.car.pedal_brake-0.25)<0.01 and scene.car.gas==1,"Analog brake at 25 percent with gas held")
+	check(absf(scene.car.pedal_brake-0.25)<0.01 and scene.car.gas==0.25,"Analog brake at 25 percent with gas held")
 	brake_touch.pressed=false
 	root.push_input(brake_touch,true)
 	pedal_drag.index=2
@@ -58,7 +61,7 @@ func world_test() -> void:
 	release.pressed=false
 	root.push_input(release,true)
 	await process_frame
-	check(scene.car.turn==0 and scene.car.gas==1,"Releasing steer keeps gas held")
+	check(scene.car.turn==0 and scene.car.gas==0.25,"Releasing steer keeps gas held")
 	# Keep gas and clutch held while a fourth independent finger moves the lever.
 	for i in range(24): await physics_frame
 	var h = scene.shifter
@@ -73,7 +76,7 @@ func world_test() -> void:
 	drag.position=h.position+Vector2(-52,-44)
 	root.push_input(drag,true)
 	check(scene.car.transmission.gear==1,"Dragging left-up engages first")
-	check(scene.car.gas==1 and scene.car.clutch_pedal==1,"Pedals remain held while shifting")
+	check(scene.car.gas==0.25 and scene.car.clutch_pedal==1,"Pedals remain held while shifting")
 	# Sideways hopping across occupied vertical slots is impossible.
 	h.drag_to(Vector2(52,-44))
 	check(scene.car.transmission.gear==1 and h.knob.x==-52,"Must leave vertical slot through neutral")

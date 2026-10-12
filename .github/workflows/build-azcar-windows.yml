@@ -2,7 +2,7 @@ name: AZ Car 3D Windows x64
 on:
   workflow_dispatch:
   push:
-    branches: [feature/az-car-3d]
+    branches: [feature/az-car-3d, feature/az-car-3d-realism-20261013]
     paths:
       - 'az-car-3d/**'
       - '.github/workflows/build-azcar-windows.yml'
@@ -17,14 +17,14 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $version = '4.5-stable'
+          $version = '4.5.1-stable'
           $base = "https://github.com/godotengine/godot-builds/releases/download/$version"
-          Invoke-WebRequest "$base/Godot_v4.5-stable_win64.exe.zip" -OutFile godot.zip
+          Invoke-WebRequest "$base/Godot_v4.5.1-stable_win64.exe.zip" -OutFile godot.zip
           Expand-Archive godot.zip -DestinationPath godot
-          Invoke-WebRequest "$base/Godot_v4.5-stable_export_templates.tpz" -OutFile templates.tpz
+          Invoke-WebRequest "$base/Godot_v4.5.1-stable_export_templates.tpz" -OutFile templates.tpz
           Copy-Item templates.tpz templates.zip
           Expand-Archive templates.zip -DestinationPath templates
-          $dest = Join-Path $env:APPDATA 'Godot/export_templates/4.5.stable'
+          $dest = Join-Path $env:APPDATA 'Godot/export_templates/4.5.1.stable'
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
           Copy-Item templates/templates/* $dest -Recurse -Force
           $exe = Get-ChildItem godot -Filter '*console.exe' -Recurse | Select-Object -First 1
@@ -35,6 +35,15 @@ jobs:
         run: |
           & $env:GODOT_EXE --headless --path az-car-3d --editor --import --quit
           if ($LASTEXITCODE -ne 0) { throw 'Godot import failed' }
+      - name: Validate scripts and driving scenarios
+        shell: pwsh
+        run: |
+          python az-car-3d/tools/validate.py $env:GODOT_EXE
+          if ($LASTEXITCODE -ne 0) { throw 'Script validation failed' }
+          & $env:GODOT_EXE --headless --path az-car-3d --script res://tests/run.gd 2>&1 | Tee-Object tests.log
+          if ($LASTEXITCODE -ne 0 -or (Select-String -Path tests.log -Pattern 'SCRIPT ERROR|ERROR:')) { throw 'Gameplay tests failed' }
+          & $env:GODOT_EXE --headless --path az-car-3d --script res://tests/cockpit_checks.gd
+          if ($LASTEXITCODE -ne 0) { throw 'Cockpit tests failed' }
       - name: Export Windows release
         shell: pwsh
         run: |
@@ -57,6 +66,7 @@ jobs:
 
   publish-release:
     needs: windows
+    if: github.ref == 'refs/heads/feature/az-car-3d'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -78,10 +88,10 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          tag="azcar-windows-v0.1.0-build.${{ github.run_number }}"
+          tag="azcar-windows-v0.7.0-build.${{ github.run_number }}"
           gh release create "$tag" release-assets/AZCar3D-Windows-x64.zip \
             --target "${{ github.sha }}" \
-            --title "AZ Car 3D Windows v0.1.0 (Build ${{ github.run_number }})" \
-            --notes "Portable Windows x64 build from feature/az-car-3d. Extract ZIP and launch AZCar3D.exe. This is an early Windows build; gameplay validation on actual hardware remains necessary." \
+            --title "AZ Car 3D Windows v0.7.0 (Build ${{ github.run_number }})" \
+            --notes "Portable Windows x64 build from feature/az-car-3d. Extract ZIP and launch AZCar3D.exe. Automated drivetrain and cockpit interaction checks passed. Preview: visual review and actual hardware validation remain necessary." \
             --prerelease
 

@@ -5,6 +5,7 @@ signal transmission_changed(mode: int)
 var transmission_selector: OptionButton
 var traffic_toggle: CheckButton
 var quality_toggle: CheckButton
+var shadow_toggle: CheckButton
 var saved := ConfigFile.new()
 func _ready() -> void:
 	position=Vector2(350,130)
@@ -31,6 +32,10 @@ func _ready() -> void:
 	quality_toggle.text="Performance mode (30 FPS)"
 	quality_toggle.custom_minimum_size=Vector2(300,60)
 	column.add_child(quality_toggle)
+	shadow_toggle=CheckButton.new()
+	shadow_toggle.text="Shadows (higher GPU cost)"
+	column.add_child(shadow_toggle)
+	shadow_toggle.toggled.connect(func(_value: bool): quality_changed.emit(quality_toggle.button_pressed))
 	transmission_selector=OptionButton.new()
 	transmission_selector.add_item("Manual transmission",0)
 	transmission_selector.add_item("Automatic transmission",1)
@@ -38,12 +43,12 @@ func _ready() -> void:
 	column.add_child(transmission_selector)
 	transmission_selector.item_selected.connect(func(index: int): transmission_changed.emit(index))
 	var hint := Label.new()
-	hint.text="Stop before changing transmission\nPedals: hold, slide down to reduce pressure"
+	hint.text="Stop before changing transmission\nGas: press 25%, drag UP for more\nBrake / clutch: slide down to reduce"
 	hint.add_theme_font_size_override("font_size",14)
 	column.add_child(hint)
 	saved.load("user://driving-settings.cfg")
 	traffic_toggle.button_pressed=saved.get_value("driving","traffic",false)
-	quality_toggle.button_pressed=saved.get_value("driving","low_quality",true)
+	quality_toggle.button_pressed=saved.get_value("driving","low_quality",OS.has_feature("android"))
 	traffic_toggle.toggled.connect(func(value: bool):
 		_save("traffic",value)
 		traffic_changed.emit(value))

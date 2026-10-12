@@ -24,6 +24,21 @@ const ENGINE_GAIN = 3.2
 const MASTER_HEADROOM = 0.96
 var layer_weights := PackedFloat32Array()
 func _ready() -> void:
+	# A dedicated bus controls the sum of layers and transient sounds.
+	if AudioServer.get_bus_index("AZ Vehicle")<0:
+		AudioServer.add_bus()
+		var bus := AudioServer.bus_count-1
+		AudioServer.set_bus_name(bus,"AZ Vehicle")
+		var filter := AudioEffectLowPassFilter.new()
+		filter.cutoff_hz=4200
+		filter.resonance=0.5
+		AudioServer.add_bus_effect(bus,filter)
+		var compressor := AudioEffectCompressor.new()
+		compressor.threshold=-5
+		compressor.ratio=8
+		compressor.attack_us=100
+		compressor.release_ms=90
+		AudioServer.add_bus_effect(bus,compressor)
 	references=car.transmission.config.audio_references
 	layer_weights.resize(references.size())
 	for i in range(references.size()):
@@ -42,6 +57,7 @@ func _ready() -> void:
 func _player(stream: AudioStreamWAV,looping: bool = true) -> AudioStreamPlayer:
 	var p := AudioStreamPlayer.new()
 	p.stream=stream
+	p.bus="AZ Vehicle"
 	p.volume_db=-80
 	add_child(p)
 	if looping: p.play()

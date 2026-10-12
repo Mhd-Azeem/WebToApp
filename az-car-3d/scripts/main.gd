@@ -11,7 +11,7 @@ var touch_buttons: Array[TouchScreenButton] = []
 var sun: DirectionalLight3D
 var held := {}
 var interior: Node3D
-var wheel: MeshInstance3D
+var wheel: Node3D
 var shifter: Node2D
 var traffic: Node3D
 var settings: PanelContainer
@@ -26,12 +26,14 @@ var wipers_on := false
 var wiper_phase := 0.0
 
 func _ready() -> void:
+	desktop_mode=OS.has_feature("windows") or OS.has_feature("linux") or OS.has_feature("macos")
 	var world := Node3D.new()
 	world.set_script(preload("res://scripts/world.gd"))
 	add_child(world)
 	car=VehicleBody3D.new()
 	car.set_script(preload("res://scripts/car.gd"))
 	add_child(car)
+	for mesh in car.visual.find_children("*","GeometryInstance3D",true,false): mesh.layers=4
 	car.reset()
 	traffic=Node3D.new()
 	traffic.set_script(preload("res://scripts/traffic.gd"))
@@ -79,22 +81,11 @@ func _ready() -> void:
 	add_child(camera)
 	camera.current=true
 	interior=Node3D.new()
+	interior.set_script(preload("res://scripts/cockpit.gd"))
+	interior.vehicle=car
+	interior.view_camera=camera
 	camera.add_child(interior)
-	G.box(interior,Vector3(0,-0.55,-0.8),Vector3(1.8,0.24,0.6),G.material("",Color(0.045,0.06,0.07)))
-	wheel=MeshInstance3D.new()
-	var ring := TorusMesh.new()
-	ring.inner_radius=0.31
-	ring.outer_radius=0.37
-	ring.rings=16
-	ring.ring_segments=12
-	wheel.mesh=ring
-	wheel.position=Vector3(0.42,-0.29,-0.57)
-	wheel.rotation.x=0.0
-	wheel.material_override=G.material("",Color(0.045,0.045,0.05))
-	interior.add_child(wheel)
-	G.box(interior,Vector3(-0.57,-0.4,-0.68),Vector3(0.13,0.23,0.1),G.material("",Color(0.13,0.14,0.15)))
-	_build_desktop_cockpit()
-	_build_cockpit_equipment()
+	wheel=interior.wheel
 	interior.visible=false
 	_hud()
 	traffic.set_enabled(settings.traffic_toggle.button_pressed)
@@ -226,6 +217,7 @@ func _settings_visibility() -> void:
 		held.clear()
 		car.release_controls()
 		shifter.cancel()
+		interior.cancel()
 
 func _press(id: String, down: bool) -> void:
 	if settings.visible and id!="settings": return
@@ -258,6 +250,10 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		var t = car.transmission
 		if event.keycode==KEY_M: t.toggle(car.signed_speed)
+		elif event.keycode==KEY_Q: car.turn_signal=0 if car.turn_signal==-1 else -1
+		elif event.keycode==KEY_Z: car.turn_signal=0 if car.turn_signal==1 else 1
+		elif event.keycode==KEY_X: car.hazards=not car.hazards
+		elif event.keycode==KEY_B: car.high_beams=not car.high_beams
 		elif event.keycode==KEY_C or event.keycode==KEY_V: camera_mode=(camera_mode+1)%3
 		elif event.keycode==KEY_E: t.start_stop()
 		elif event.keycode==KEY_H: car.horn=1.0
@@ -275,22 +271,20 @@ func _input(event: InputEvent) -> void:
 
 func _process(delta: float) -> void:
 	cockpit=camera_mode==1
-	gauges.visible=camera_mode in [1,2]
+	gauges.visible=camera_mode==2
 	interior.visible=cockpit
-	wheel.rotation.z=-car.steering*2.5
-	if wipers_on: wiper_phase+=delta*6.0
-	else: wiper_phase=move_toward(wiper_phase,0.0,delta*6.0)
-	for i in range(wiper_parts.size()):
-		wiper_parts[i].rotation.z=(sin(wiper_phase)*0.65 if wipers_on else 0.0)*(1.0 if i==0 else -1.0)
 	if cockpit:
 		camera.global_position=car.to_global(Vector3(0.42,1.58,0.5))
 		camera.look_at(camera.global_position+car.global_basis.z*10,car.global_basis.y)
-		car.visual.visible=false
+		car.visual.visible=true
+		camera.cull_mask=3
 	elif camera_mode==2:
+		camera.cull_mask=7
 		car.visual.visible=true
 		camera.global_position=car.to_global(Vector3(0,1.32,1.15))
 		camera.look_at(camera.global_position+car.global_basis.z*20,car.global_basis.y)
 	else:
+		camera.cull_mask=7
 		car.visual.visible=true
 		var desired := car.to_global(Vector3(0,4.1,-8.5))
 		var target := car.global_position+Vector3(0,1.2,0)
@@ -321,7 +315,8 @@ func _process(delta: float) -> void:
 
 func _apply_quality(low: bool) -> void:
 	low_quality=low
-	sun.shadow_enabled=not low
+	if is_instance_valid(interior): interior.set_quality(low)
+	sun.shadow_enabled=not low and settings.shadow_toggle.button_pressed
 	Engine.max_fps=30 if low else 60
 	camera.far=190 if low else 260
 	get_world_3d().environment.fog_depth_end=185 if low else 255
@@ -360,60 +355,3 @@ func _desktop_controls(layer: CanvasLayer) -> void:
 	desktop_help.add_theme_color_override("font_color",Color(0.94,0.97,1))
 	layer.add_child(desktop_help)
 
-func _build_desktop_cockpit() -> void:
-	var dark := G.material("",Color(0.045,0.052,0.065))
-	var trim := G.material("",Color(0.23,0.26,0.29))
-	var leather := G.material("",Color(0.08,0.085,0.09))
-	# Camera-space interior: dashboard, windshield surround, door panels and center stack.
-	G.box(interior,Vector3(0,-0.55,-1.05),Vector3(2.8,0.28,0.72),dark)
-	G.box(interior,Vector3(0,-0.38,-1.24),Vector3(2.8,0.045,0.18),trim)
-	G.box(interior,Vector3(-1.26,0.22,-1.05),Vector3(0.14,1.55,0.19),dark)
-	G.box(interior,Vector3(1.26,0.22,-1.05),Vector3(0.14,1.55,0.19),dark)
-	G.box(interior,Vector3(0,0.97,-1.06),Vector3(2.5,0.13,0.22),dark)
-	G.box(interior,Vector3(-1.04,-0.61,-0.59),Vector3(0.52,0.46,0.68),leather)
-	G.box(interior,Vector3(1.04,-0.61,-0.59),Vector3(0.52,0.46,0.68),leather)
-	G.box(interior,Vector3(0.80,-0.52,-0.74),Vector3(0.55,0.39,0.11),trim)
-	G.box(interior,Vector3(0.80,-0.52,-0.67),Vector3(0.47,0.31,0.025),dark)
-	G.box(interior,Vector3(0,-0.32,-0.63),Vector3(0.27,0.22,0.10),leather)
-	for x in [-0.31,0.31]:
-		G.box(interior,Vector3(x,-0.34,-0.64),Vector3(0.31,0.055,0.06),trim)
-	for x in [-0.88,0.88]:
-		G.box(interior,Vector3(x,-0.42,-0.72),Vector3(0.36,0.10,0.09),trim)
-
-func _setup_cockpit_overlay() -> void:
-	cockpit_overlay=Control.new()
-	cockpit_overlay.set_script(preload("res://scripts/ui/cockpit_controls.gd"))
-	var layer := CanvasLayer.new()
-	add_child(layer)
-	layer.add_child(cockpit_overlay)
-	cockpit_overlay.headlights_changed.connect(func(enabled: bool):
-		for light in headlamps: light.visible=enabled)
-	cockpit_overlay.wipers_changed.connect(func(enabled: bool): wipers_on=enabled)
-	cockpit_overlay.horn_changed.connect(func(pressed: bool): car.horn=float(pressed))
-
-func _build_cockpit_equipment() -> void:
-	# Cockpit parts are shared by Android and Windows; lights illuminate the world.
-	var dark := G.material("",Color(0.035,0.039,0.045))
-	var chrome := G.material("",Color(0.32,0.34,0.36))
-	var glass := G.material("",Color(0.09,0.14,0.18))
-	for side in [-1.0,1.0]:
-		var lamp := SpotLight3D.new()
-		lamp.position=Vector3(side*0.64,0.62,1.75)
-		lamp.rotation_degrees=Vector3(7.0,180.0,0.0)
-		lamp.spot_range=42.0
-		lamp.spot_angle=35.0
-		lamp.light_energy=2.0
-		lamp.visible=false
-		car.add_child(lamp)
-		headlamps.append(lamp)
-		var mirror := Node3D.new()
-		mirror.position=Vector3(side*1.35,-0.20,-1.10)
-		interior.add_child(mirror)
-		G.box(mirror,Vector3.ZERO,Vector3(0.43,0.25,0.12),dark)
-		G.box(mirror,Vector3(0,0,-0.065),Vector3(0.36,0.18,0.012),glass)
-		var wiper := Node3D.new()
-		wiper.position=Vector3(side*0.25,-0.40,-1.60)
-		interior.add_child(wiper)
-		G.box(wiper,Vector3(0,0.25,0),Vector3(0.024,0.54,0.03),dark)
-		G.box(wiper,Vector3(0,0.50,0),Vector3(0.07,0.04,0.04),chrome)
-		wiper_parts.append(wiper)

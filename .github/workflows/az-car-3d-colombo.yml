@@ -1,7 +1,7 @@
 name: AZ Car 3D Colombo APK
 on:
   push:
-    branches: [feature/az-car-3d]
+    branches: [feature/az-car-3d, feature/az-car-3d-realism-20261013]
     paths: ['az-car-3d/**', '.github/workflows/az-car-3d-colombo.yml', '.github/workflows/az-car-3d-controls-release.yml']
   workflow_dispatch:
 permissions:
@@ -11,7 +11,6 @@ concurrency:
   cancel-in-progress: false
 jobs:
   android:
-    if: github.ref == 'refs/heads/feature/az-car-3d'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -67,61 +66,34 @@ jobs:
           set -euo pipefail
           godot --headless --path az-car-3d --script res://tests/run.gd 2>&1 | tee az-car-3d/build/tests.log
           if grep -E 'SCRIPT ERROR|ERROR:' az-car-3d/build/tests.log; then exit 1; fi
+      - name: Cockpit interactions
+        run: godot --headless --path az-car-3d --script res://tests/cockpit_checks.gd
       - name: Export debug Android APK
         run: |
           set -euo pipefail
-          godot --headless --path az-car-3d --export-debug Android build/AZ-Car-3D-Colombo-debug.apk 2>&1 | tee az-car-3d/build/export.log
+          godot --headless --path az-car-3d --export-debug Android build/AZ-Car-3D-Colombo.apk 2>&1 | tee az-car-3d/build/export.log
           if grep -E 'SCRIPT ERROR|ERROR:' az-car-3d/build/export.log; then exit 1; fi
-          test -s az-car-3d/build/AZ-Car-3D-Colombo-debug.apk
-          "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose az-car-3d/build/AZ-Car-3D-Colombo-debug.apk
-          "$ANDROID_HOME/build-tools/35.0.1/aapt" dump badging az-car-3d/build/AZ-Car-3D-Colombo-debug.apk | tee az-car-3d/build/apk-badging.txt
+          test -s az-car-3d/build/AZ-Car-3D-Colombo.apk
+          "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose az-car-3d/build/AZ-Car-3D-Colombo.apk
+          "$ANDROID_HOME/build-tools/35.0.1/aapt" dump badging az-car-3d/build/AZ-Car-3D-Colombo.apk | tee az-car-3d/build/apk-badging.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AZ-Car-3D-Colombo-debug
+          name: AZ-Car-3D-Android-${{ github.sha }}
           path: az-car-3d/build/
           if-no-files-found: error
-      - name: Publish verified APK to rolling game release
-        if: success()
+      - name: Publish versioned Android preview
+        if: success() && github.ref == 'refs/heads/feature/az-car-3d'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           SOURCE_SHA: ${{ github.sha }}
-          RELEASE_TAG: az-car-3d-latest
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           cd az-car-3d/build
-          test -s AZ-Car-3D-Colombo-debug.apk
-          sha256sum AZ-Car-3D-Colombo-debug.apk > SHA256SUMS.txt
-          cat > release-notes.md <<'EOF'
-          Latest verified AZ Car 3D Android preview. This release is refreshed automatically after every successful game build on feature/az-car-3d. Failed builds leave the previous APK available.
-
-          Download AZ-Car-3D-Colombo-debug.apk below. Android arm64, Android 7.0+; debug-signed preview.
-
-          Includes connected long Colombo-inspired roads and collision, procedural engine/start/shift/horn/brake/tire audio, analog speed and RPM gauges with gear readout in hood view, chase and cockpit cameras, manual/automatic transmission and native multitouch controls.
-
-          v0.4 driving update: improved steering return and high-speed stability, stronger brakes and easier clutch engagement; gear limits 40 / 60 / 80 / 120 / 220 km/h; saved Settings traffic toggle with eight collision-aware vehicles; automatic rear-camera inset in both manual and automatic reverse. Performance mode disables antialiasing and shortens viewing distance. Rear view is capped at 15 FPS and stops rendering outside reverse.
-
-          v0.5 landscape update: faster, more sensitive steering; traffic uses the same detailed coupe as the player in eight paint colors; rolling grass terrain and hills with collision, sandy coast and sea, sidewalk and roadside trees, shrubs, rocks, parks, paths and benches. Shared and merged meshes plus spatial vegetation batches limit rendering overhead.
-
-          v0.6 drivetrain update: configurable 180 Nm / approximately 110 HP engine with inertia, friction, starter, stalls and ignition limiter; mechanical analog clutch and five-speed transmission; automatic torque converter, creep and kickdown; wheel brakes and handbrake; four RPM-synchronized native audio layers with load, shift, grinding, stall and shutdown sounds. Analog gauges now also appear in cockpit. Tap pedals for full pressure, hold and slide down to reduce pressure. P-in-circle / Space toggles handbrake; power / E starts or stops the engine. Manual / Automatic is available in Settings.
-
-          Camera button / V cycles chase, cockpit and hood. Speaker button / H holds the horn. Hold clutch to shift manually; stop and hold brake to select automatic D. Start with LOW quality.
-
-          Godot validation, transmission/multitouch/road collision tests, Android export and APK signature verification must pass before publication. Device performance and audio quality still require physical Android testing. SHA256SUMS.txt contains the APK checksum.
-
-          WebToApp and previous versioned game releases remain available separately.
-          EOF
-          printf '\nSource commit: [%s](https://github.com/%s/commit/%s)\n\nVerified build: %s\n' "$SOURCE_SHA" "$GH_REPO" "$SOURCE_SHA" "$RUN_URL" >> release-notes.md
-          # Detect existing releases without hiding authentication/network failures.
-          gh api "repos/$GH_REPO/releases" --paginate --jq '.[].tag_name' > release-tags.txt
-          if grep -Fxq "$RELEASE_TAG" release-tags.txt; then
-            # This intentionally moves only the rolling game tag; version tags stay fixed.
-            gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$RELEASE_TAG" -f sha="$SOURCE_SHA" -F force=true
-            gh release upload "$RELEASE_TAG" AZ-Car-3D-Colombo-debug.apk SHA256SUMS.txt --clobber
-            gh release edit "$RELEASE_TAG" --title 'AZ Car 3D — Latest APK' --notes-file release-notes.md --prerelease --latest=false
-          else
-            gh release create "$RELEASE_TAG" --target "$SOURCE_SHA" --prerelease --latest=false --title 'AZ Car 3D — Latest APK' --notes-file release-notes.md AZ-Car-3D-Colombo-debug.apk SHA256SUMS.txt
-          fi
-
+          sha256sum AZ-Car-3D-Colombo.apk > SHA256SUMS-Android.txt
+          tag="azcar-android-v0.7.0-build.${{ github.run_number }}"
+          gh release create "$tag" AZ-Car-3D-Colombo.apk SHA256SUMS-Android.txt \
+            --target "$SOURCE_SHA" --prerelease --latest=false \
+            --title "AZ Car 3D Android v0.7.0 preview (Build ${{ github.run_number }})" \
+            --notes "Source: $SOURCE_SHA. Godot import, drivetrain and vehicle scenarios, APK export and signature verification passed. Preserves the existing cached debug signing key. Preview: physical Android performance, touch ergonomics and listening tests remain unverified."
