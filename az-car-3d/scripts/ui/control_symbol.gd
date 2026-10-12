@@ -16,6 +16,12 @@ func _draw() -> void:
 	draw_circle(Vector2.ZERO,43,Color(0.035,0.075,0.11,0.82))
 	draw_arc(Vector2.ZERO,42,0,TAU,48,Color(0.35,0.77,0.85) if active else Color(0.45,0.56,0.63,0.70),2,true)
 	match kind:
+		"settings":
+			draw_circle(Vector2.ZERO,18,INK,false,3,true)
+			draw_circle(Vector2.ZERO,7,INK,false,3,true)
+			for i in range(8):
+				var d := Vector2(cos(i*TAU/8),sin(i*TAU/8))
+				line(d*20,d*28,5)
 		"horn":
 			line(Vector2(-22,-10),Vector2(-8,-10),3)
 			line(Vector2(-8,-10),Vector2(12,-24),3)

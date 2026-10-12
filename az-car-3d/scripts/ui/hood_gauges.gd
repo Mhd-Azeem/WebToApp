@@ -12,7 +12,7 @@ func _process(delta: float) -> void:
 	gear=t.selector if t.mode==1 and t.selector!="D" else (str(t.auto_gear) if t.mode==1 else ("R" if t.gear==-1 else ("N" if t.gear==0 else str(t.gear))))
 	queue_redraw()
 func _draw() -> void:
-	_dial(Vector2(-112,0),speed,180.0,"km/h",9)
+	_dial(Vector2(-112,0),speed,240.0,"km/h",12)
 	_dial(Vector2(112,0),rpm/1000.0,8.0,"RPM x1000",8)
 	draw_rect(Rect2(-31,-32,62,64),Color(0.02,0.04,0.06,0.88))
 	draw_string(ThemeDB.fallback_font,Vector2(-12,9),gear,HORIZONTAL_ALIGNMENT_LEFT,-1,30,INK)
@@ -25,10 +25,11 @@ func _dial(c: Vector2,value: float,maximum: float,title: String,ticks: int) -> v
 		var d := Vector2(cos(a),sin(a))
 		var major := i%4==0
 		draw_line(c+d*(63 if major else 70),c+d*76,Color(1,0.25,0.16) if float(i)/(ticks*4)>0.78 else INK,2,true)
-		if major:
+		if major and (maximum<10 or i%8==0):
 			var text := str(roundi(maximum*i/(ticks*4)))
 			draw_string(ThemeDB.fallback_font,c+d*52-Vector2(7,-5),text,HORIZONTAL_ALIGNMENT_LEFT,-1,12,INK)
 	var angle := deg_to_rad(135+270*clampf(value/maximum,0,1))
 	draw_line(c,c+Vector2(cos(angle),sin(angle))*62,Color(1,0.25,0.16),3,true)
 	draw_circle(c,5,INK)
 	draw_string(ThemeDB.fallback_font,c+Vector2(-30,37),title,HORIZONTAL_ALIGNMENT_LEFT,-1,12,INK)
+

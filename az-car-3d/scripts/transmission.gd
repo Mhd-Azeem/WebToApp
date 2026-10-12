@@ -11,7 +11,9 @@ var running := true
 var ignition_serial := 0
 var auto_gear := 1
 var message := "Hold clutch, select 1, release clutch gently and accelerate"
-const RATIOS := [0.0, 3.55, 2.05, 1.36, 1.03, 0.82]
+const SPEED_LIMITS := [0.0,40.0,60.0,80.0,120.0,220.0]
+# Ratios place 6500 RPM at each requested road speed with a 3.9 final drive.
+const RATIOS := [0.0,5.34,3.56,2.67,1.78,0.97]
 
 func shift(next: int, speed: float) -> bool:
 	if mode != Mode.MANUAL or clutch < 0.85 or next < -1 or next > 5:
@@ -45,6 +47,7 @@ func toggle(speed: float) -> void:
 func restart() -> void:
 	if clutch > 0.85 or gear == 0 or mode == Mode.AUTOMATIC:
 		running = true
+		ignition_serial += 1
 		rpm = 850.0
 		message = "Engine started"
 
@@ -53,7 +56,7 @@ func ratio(speed: float) -> float:
 	if selector == "R": return -3.3
 	if selector != "D": return 0.0
 	var kph := absf(speed) * 3.6
-	var thresholds := [17.0, 34.0, 56.0, 82.0]
+	var thresholds := [36.0,56.0,76.0,116.0]
 	# Hysteresis prevents hunting around a shift threshold.
 	if auto_gear < 5 and kph > thresholds[auto_gear - 1] + 2.0: auto_gear += 1
 	if auto_gear > 1 and kph < thresholds[auto_gear - 2] - 3.0: auto_gear -= 1
@@ -74,10 +77,14 @@ func update(delta: float, speed: float, gas: float) -> float:
 		rpm = 0.0
 		return 0.0
 	if rpm > 6400.0: gas = 0.0
-	var torque := 160.0 * (0.65 + 0.35 * sin(clampf(rpm / 6500.0, 0, 1) * PI))
+	var engaged_gear := gear if mode==Mode.MANUAL else auto_gear
+	var limit: float = 25.0 if r<0 else (SPEED_LIMITS[engaged_gear] if r>0 else 0.0)
+	if r!=0 and absf(speed)*3.6>=limit: gas=0
+	var torque := 520.0 * (0.85 + 0.15 * sin(clampf(rpm / 6500.0, 0, 1) * PI))
 	return gas * torque * r * 3.9 / 0.34 * engagement
 
 func display() -> String:
 	if mode == Mode.AUTOMATIC: return "AT " + selector + (" / " + str(auto_gear) if selector == "D" else "")
 	return "MT " + ("R" if gear == -1 else ("N" if gear == 0 else str(gear)))
+
 

@@ -15,4 +15,12 @@ func capture() -> void:
 	for i in range(5): await process_frame
 	await RenderingServer.frame_post_draw
 	root.get_texture().get_image().save_png("res://build/hood.png")
+	scene.car.transmission.gear=-1
+	for i in range(8): await process_frame
+	await RenderingServer.frame_post_draw
+	root.get_texture().get_image().save_png("res://build/reverse.png")
+	scene._press("settings",true)
+	for i in range(5): await process_frame
+	await RenderingServer.frame_post_draw
+	root.get_texture().get_image().save_png("res://build/settings.png")
 	quit()

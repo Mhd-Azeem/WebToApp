@@ -16,9 +16,14 @@ var last_ignition := 0
 var last_throttle := 0.0
 var noise := RandomNumberGenerator.new()
 var filtered_noise := 0.0
+var motor_table := PackedFloat32Array()
 
 func _ready() -> void:
 	noise.seed=32003
+	motor_table.resize(2048)
+	for i in range(2048):
+		var p := TAU*i/2048.0
+		motor_table[i]=sin(p)*0.55+sin(p*2)*0.25+sin(p*3)*0.12
 	player=AudioStreamPlayer.new()
 	var stream := AudioStreamGenerator.new()
 	stream.mix_rate=RATE
@@ -60,7 +65,9 @@ func _process(_delta: float) -> void:
 		phase=fposmod(phase+TAU*hz/RATE,TAU)
 		var white := noise.randf_range(-1,1)
 		filtered_noise=lerpf(filtered_noise,white,0.18)
-		var motor := sin(phase)*0.55+sin(phase*2)*0.25+sin(phase*3)*0.12
+		var index := phase*2048.0/TAU
+		var slot := int(index)%2048
+		var motor := lerpf(motor_table[slot],motor_table[(slot+1)%2048],index-floorf(index))
 		var limiter := 0.6 if smooth_rpm>6250 and sin(clock*TAU*24)>0 else 1.0
 		var v := motor*gain*limiter*(0.45 if shift_left>0 else 1.0)
 		v+=filtered_noise*throttle*gain*0.3
@@ -68,7 +75,7 @@ func _process(_delta: float) -> void:
 		if shift_left>0: v+=filtered_noise*shift_left*0.3
 		if drop_left>0: v+=sin(phase*0.5)*drop_left*0.16
 		v+=white*braking*0.025
-		v+=(sin(clock*TAU*1450)*0.045+white*0.06)*tire*clampf(speed/8,0,1)
+		if tire>0.01: v+=(sin(clock*TAU*1450)*0.045+white*0.06)*tire*clampf(speed/8,0,1)
 		if horn_on: v+=(sin(clock*TAU*440)+sin(clock*TAU*554))*0.10
 		v=clampf(v,-0.85,0.85)
 		playback.push_frame(Vector2(v,v))

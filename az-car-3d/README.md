@@ -78,3 +78,5 @@ real-car simulation: no differential, tire temperature, gearbox damage, adaptive
 shifts or torque converter simulation. Handling needs device/user tuning.
 No claim of GTA V fidelity. Current scenery is a textured modular vertical slice;
 see `docs/VALIDATION.md` for actual checks and outstanding work.
+
+Driving update: open the gear icon for saved traffic and performance settings. Traffic is off by default. Reverse shows a rear-camera inset. Gear limits are 40 / 60 / 80 / 120 / 220 km/h. See docs/DRIVING_UPDATE.md. Every successful branch build refreshes the az-car-3d-latest GitHub release APK.

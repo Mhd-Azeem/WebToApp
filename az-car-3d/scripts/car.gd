@@ -6,6 +6,7 @@ var gas := 0.0
 var horn := 0.0
 var effective_gas := 0.0
 var effective_brake := 0.0
+var controls_enabled := true
 var pedal_brake := 0.0
 var turn := 0.0
 var clutch_pedal := 0.0
@@ -15,8 +16,11 @@ var visual: Node3D
 
 func _ready() -> void:
 	mass = 1250
+	collision_mask=3
+	continuous_cd=true
+	angular_damp=1.8
 	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
-	center_of_mass = Vector3(0,0.1,0)
+	center_of_mass = Vector3(0,-0.18,0)
 	var shape := CollisionShape3D.new()
 	var hull := BoxShape3D.new()
 	hull.size=Vector3(1.78,0.9,4.0)
@@ -92,7 +96,8 @@ func _ready() -> void:
 			w.suspension_max_force=8500
 			w.damping_compression=0.8
 			w.damping_relaxation=0.9
-			w.wheel_friction_slip=2.2
+			w.wheel_friction_slip=3.2
+			w.wheel_roll_influence=0.12
 			w.use_as_steering=z>0
 			w.use_as_traction=z<0
 			add_child(w)
@@ -128,18 +133,29 @@ func _physics_process(delta: float) -> void:
 	signed_speed = linear_velocity.dot(global_basis.z)
 	var t := maxf(gas,float(Input.is_key_pressed(KEY_W)))
 	var b := maxf(pedal_brake,float(Input.is_key_pressed(KEY_S)))
+	if not controls_enabled:
+		t=0
+		b=1
 	effective_gas=t
 	effective_brake=b
 	var c := maxf(clutch_pedal,float(Input.is_key_pressed(KEY_C)))
-	transmission.clutch=move_toward(transmission.clutch,c,delta*3.0)
+	if not controls_enabled: c=1
+	transmission.clutch=move_toward(transmission.clutch,c,delta*(6.0 if c>transmission.clutch else 2.4))
 	var steer_input := turn + float(Input.is_key_pressed(KEY_A))-float(Input.is_key_pressed(KEY_D))
-	steering = move_toward(steering,clampf(steer_input,-1,1)*0.48/(1+absf(signed_speed)*0.045),delta*1.6)
+	if not controls_enabled: steer_input=0
+	var target_steer := clampf(steer_input,-1,1)*0.50/(1+signed_speed*signed_speed*0.018)
+	steering = move_toward(steering,target_steer,delta*(2.6 if is_zero_approx(steer_input) else 1.8))
 	engine_force=transmission.update(delta,signed_speed,t)
-	brake=b*45.0
+	brake=b*65.0
 	if transmission.mode==Transmission.Mode.AUTOMATIC and transmission.selector=="P": brake=80.0
 	# Drag and rolling resistance; braking is handled by the wheel contact solver.
-	apply_central_force(-linear_velocity*linear_velocity.length()*0.42)
-	if signed_speed>45 or signed_speed < -10: engine_force=0
+	apply_central_force(-linear_velocity*linear_velocity.length()*0.34)
+	var grounded := false
+	for w in wheels: grounded=grounded or w.is_in_contact()
+	if grounded:
+		var lateral := linear_velocity.dot(global_basis.x)
+		apply_central_force(-global_basis.x*lateral*mass*2.5)
+		apply_central_force(-global_basis.y*minf(3000, signed_speed*signed_speed*1.2))
 	if position.y < -5: reset()
 
 func reset() -> void:
@@ -157,4 +173,5 @@ func release_controls() -> void:
 	pedal_brake=0
 	turn=0
 	clutch_pedal=0
+
 

@@ -13,6 +13,9 @@ var held := {}
 var interior: Node3D
 var wheel: MeshInstance3D
 var shifter: Node2D
+var traffic: Node3D
+var settings: PanelContainer
+var rear_view: Node
 
 func _ready() -> void:
 	var world := Node3D.new()
@@ -22,6 +25,10 @@ func _ready() -> void:
 	car.set_script(preload("res://scripts/car.gd"))
 	add_child(car)
 	car.reset()
+	traffic=Node3D.new()
+	traffic.set_script(preload("res://scripts/traffic.gd"))
+	traffic.player=car
+	add_child(traffic)
 	var engine_audio := Node.new()
 	engine_audio.set_script(preload("res://scripts/engine_audio.gd"))
 	engine_audio.car=car
@@ -70,11 +77,22 @@ func _ready() -> void:
 	G.box(interior,Vector3(-0.57,-0.4,-0.68),Vector3(0.13,0.23,0.1),G.material("",Color(0.13,0.14,0.15)))
 	interior.visible=false
 	_hud()
-	Engine.max_fps=30
+	traffic.set_enabled(settings.traffic_toggle.button_pressed)
+	_apply_quality(settings.quality_toggle.button_pressed)
 
 func _hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
+	settings=PanelContainer.new()
+	settings.set_script(preload("res://scripts/ui/driving_settings.gd"))
+	layer.add_child(settings)
+	settings.traffic_changed.connect(func(value: bool): traffic.set_enabled(value))
+	settings.quality_changed.connect(_apply_quality)
+	settings.visibility_changed.connect(func(): car.controls_enabled=not settings.visible)
+	rear_view=Node.new()
+	rear_view.set_script(preload("res://scripts/rear_camera.gd"))
+	add_child(rear_view)
+	rear_view.setup(layer,car)
 	var backing := ColorRect.new()
 	backing.position=Vector2(12,10)
 	backing.size=Vector2(650,64)
@@ -109,6 +127,9 @@ func _hud() -> void:
 	_touch(layer,Vector2(24,100),Vector2(58,58),"quality")
 	_touch(layer,Vector2(94,100),Vector2(58,58),"regions")
 	_touch(layer,Vector2(164,100),Vector2(58,58),"horn")
+	_touch(layer,Vector2(234,100),Vector2(58,58),"settings")
+	# Settings stays above all driving overlays when opened.
+	layer.move_child(settings,layer.get_child_count()-1)
 
 func _touch(parent: Node, pos: Vector2, size: Vector2, id: String) -> void:
 	var button := TouchScreenButton.new()
@@ -149,6 +170,7 @@ func _touch(parent: Node, pos: Vector2, size: Vector2, id: String) -> void:
 	touch_buttons.append(button)
 
 func _press(id: String, down: bool) -> void:
+	if settings.visible and id!="settings": return
 	held[id]=down
 	car.horn=float(held.get("horn",false))
 	car.gas=float(held.get("gas",false))
@@ -162,13 +184,17 @@ func _press(id: String, down: bool) -> void:
 	elif id=="start": car.transmission.restart()
 	elif id=="reset": car.reset()
 	elif id=="camera": camera_mode=(camera_mode+1)%3
+	elif id=="settings":
+		settings.visible=not settings.visible
+		held.clear()
+		car.release_controls()
+		shifter.cancel()
 	elif id=="quality":
-		low_quality=not low_quality
-		sun.shadow_enabled=not low_quality
-		Engine.max_fps=30 if low_quality else 60
+		settings.quality_toggle.button_pressed=not low_quality
 	elif id=="regions": car.transmission.message="Playable: Colombo • Planned: Kandy hills / Galle coast / rural villages"
 
 func _input(event: InputEvent) -> void:
+	if settings.visible: return
 	if event is InputEventKey and event.pressed and not event.echo:
 		var t = car.transmission
 		if event.keycode==KEY_M: t.toggle(car.signed_speed)
@@ -214,6 +240,13 @@ func _process(delta: float) -> void:
 		var id: String=button.get_meta("id")
 		if id.begins_with("gear") or id=="clutch": button.visible=t.mode==0
 		if id.begins_with("auto"): button.visible=t.mode==1
+
+func _apply_quality(low: bool) -> void:
+	low_quality=low
+	sun.shadow_enabled=not low
+	Engine.max_fps=30 if low else 60
+	camera.far=190 if low else 260
+	get_viewport().msaa_3d=Viewport.MSAA_DISABLED if low else Viewport.MSAA_2X
 
 func _notification(what: int) -> void:
 	if what==NOTIFICATION_APPLICATION_FOCUS_OUT and is_instance_valid(car):

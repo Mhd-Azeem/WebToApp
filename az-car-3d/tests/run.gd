@@ -38,6 +38,18 @@ func _initialize() -> void:
 	t.restart()
 	check(t.running,"Clutch permits engine restart")
 	print("Transmission checks: ","PASS" if failures==0 else "FAIL")
+	# Requested gearing: drive force cuts at each limit but fifth drives past 200.
+	t.mode=T.Mode.MANUAL
+	t.clutch=0
+	t.running=true
+	for g in range(1,6):
+		t.gear=g
+		t.rpm=5000
+		check(t.update(0.001,(T.SPEED_LIMITS[g]-2)/3.6,1)>0,"Drive below gear limit")
+		check(is_zero_approx(t.update(0.001,T.SPEED_LIMITS[g]/3.6,1)),"No drive above gear limit")
+	t.gear=5
+	t.rpm=5900
+	check(t.update(0.001,205.0/3.6,1)>0,"Fifth supports 200+ km/h")
 	call_deferred("world_test")
 func world_test() -> void:
 	var scene = load("res://scenes/main.tscn").instantiate()
@@ -119,12 +131,14 @@ func world_test() -> void:
 	scene.car.reset()
 	for i in range(120): await physics_frame
 	var g = load("res://scripts/geometry.gd")
-	g.box(scene,Vector3(-3.5,1,110),Vector3(8,2,1),g.material("concrete"),true)
+	var obstacle = g.box(scene,Vector3(-3.5,1,110),Vector3(8,2,1),g.material("concrete"),true)
 	scene.car.transmission.toggle(0)
 	scene.car.transmission.select("D",0,1)
 	scene.car.gas=1
 	for i in range(240): await physics_frame
 	check(scene.car.position.z>109,"Physical barrier blocks vehicle")
+	obstacle.queue_free()
+	await physics_frame
 	print("Scene / vehicle checks: ","PASS" if failures==0 else "FAIL")
 	# Surfaces and clear passage at every former boundary, seam and outer loop.
 	var space: PhysicsDirectSpaceState3D = scene.get_world_3d().direct_space_state
@@ -162,6 +176,52 @@ func world_test() -> void:
 	for i in range(600): await physics_frame
 	check(scene.car.position.z < -250 and scene.car.position.y > -1,"Powered car crosses city boundary onto extended road")
 	print("Extended-road powered drive: ",scene.car.position)
+	scene.car.release_controls()
+	scene.settings.traffic_toggle.button_pressed=true
+	await physics_frame
+	await physics_frame
+	check(scene.traffic.enabled and scene.traffic.vehicles.size()==8,"Settings enables bounded traffic")
+	var before: Vector3=scene.traffic.vehicles[0].position
+	for i in range(60): await physics_frame
+	check(scene.traffic.vehicles[0].position.distance_to(before)>0.1,"Traffic moves along connected roads")
+	scene.settings.traffic_toggle.button_pressed=false
+	await physics_frame
+	before=scene.traffic.vehicles[0].position
+	for i in range(10): await physics_frame
+	check(scene.traffic.vehicles[0].position==before and scene.traffic.vehicles[0].collision_layer==0,"Traffic off stops work and removes collision")
+	scene.car.transmission.mode=T.Mode.MANUAL
+	scene.car.transmission.gear=-1
+	await process_frame
+	await process_frame
+	check(scene.rear_view.active and scene.rear_view.display.visible,"Manual reverse enables second display")
+	scene.car.transmission.mode=T.Mode.AUTOMATIC
+	scene.car.transmission.selector="R"
+	await process_frame
+	await process_frame
+	check(scene.rear_view.active,"Automatic reverse enables second display")
+	scene.car.transmission.selector="N"
+	await process_frame
+	await process_frame
+	check(not scene.rear_view.active and scene.rear_view.viewport.render_target_update_mode==SubViewport.UPDATE_DISABLED,"Rear rendering disabled outside reverse")
+	scene._press("settings",true)
+	check(scene.settings.visible and not scene.car.controls_enabled,"Settings stops driving inputs")
+	scene.settings.hide()
+	check(scene.car.controls_enabled,"Closing settings restores control")
+	print("Traffic / settings / reverse camera: ","PASS" if failures==0 else "FAIL")
+	scene.car.reset()
+	scene.car.position=Vector3(-3.5,1,850)
+	scene.car.transmission.mode=T.Mode.AUTOMATIC
+	scene.car.transmission.auto_gear=1
+	for i in range(120): await physics_frame
+	scene.car.transmission.select("D",0,1)
+	scene.car.gas=1
+	var max_kph := 0.0
+	for i in range(1800):
+		await physics_frame
+		max_kph=maxf(max_kph,absf(scene.car.signed_speed)*3.6)
+	check(max_kph>200,"Powered fifth gear physically exceeds 200 km/h")
+	check(scene.car.position.y>-1,"High-speed road collision supports car")
+	print("High-speed drive peak: ",max_kph," km/h, gear ",scene.car.transmission.auto_gear,", position ",scene.car.position)
 	scene.queue_free()
 	await process_frame
 	quit(1 if failures else 0)
