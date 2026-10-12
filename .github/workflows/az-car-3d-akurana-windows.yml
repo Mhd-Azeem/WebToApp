@@ -1,0 +1,92 @@
+name: AZ Car 3D Akurana Windows x64
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/az-car-3d-akurana-map]
+    paths:
+      - 'az-car-3d/**'
+      - '.github/workflows/az-car-3d-akurana-windows.yml'
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install matching Godot 4.5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '4.5.1-stable'
+          $base = "https://github.com/godotengine/godot-builds/releases/download/$version"
+          Invoke-WebRequest "$base/Godot_v4.5.1-stable_win64.exe.zip" -OutFile godot.zip
+          Expand-Archive godot.zip -DestinationPath godot
+          Invoke-WebRequest "$base/Godot_v4.5.1-stable_export_templates.tpz" -OutFile templates.tpz
+          Copy-Item templates.tpz templates.zip
+          Expand-Archive templates.zip -DestinationPath templates
+          $dest = Join-Path $env:APPDATA 'Godot/export_templates/4.5.1.stable'
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Copy-Item templates/templates/* $dest -Recurse -Force
+          $exe = Get-ChildItem godot -Filter '*console.exe' -Recurse | Select-Object -First 1
+          if (-not $exe) { throw 'Godot console executable missing' }
+          "GODOT_EXE=$($exe.FullName)" | Out-File -Append $env:GITHUB_ENV -Encoding utf8
+      - name: Import and validate Godot project
+        shell: pwsh
+        run: |
+          & $env:GODOT_EXE --headless --path az-car-3d --editor --import --quit
+          if ($LASTEXITCODE -ne 0) { throw 'Godot import failed' }
+      - name: Validate scripts and driving scenarios
+        shell: pwsh
+        run: |
+          python az-car-3d/tools/validate.py $env:GODOT_EXE
+          if ($LASTEXITCODE -ne 0) { throw 'Script validation failed' }
+          & $env:GODOT_EXE --headless --path az-car-3d --script res://tests/run.gd 2>&1 | Tee-Object tests.log
+          if ($LASTEXITCODE -ne 0 -or (Select-String -Path tests.log -Pattern 'SCRIPT ERROR|ERROR:')) { throw 'Gameplay tests failed' }
+          & $env:GODOT_EXE --headless --path az-car-3d --script res://tests/cockpit_checks.gd
+          if ($LASTEXITCODE -ne 0) { throw 'Cockpit tests failed' }
+      - name: Akurana geographic smoke checks
+        shell: pwsh
+        run: |
+          & $env:GODOT_EXE --headless --path az-car-3d --script res://tests/akurana_smoke.gd
+          if ($LASTEXITCODE -ne 0) { throw 'Akurana smoke checks failed' }
+      - name: Export Windows release
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force az-car-3d/build/windows | Out-Null
+          & $env:GODOT_EXE --headless --path az-car-3d --export-release 'Windows Desktop' build/windows/AZCar3D-Akurana.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Windows export failed' }
+          if (-not (Test-Path az-car-3d/build/windows/AZCar3D.exe)) { throw 'EXE missing' }
+          $files = Get-ChildItem az-car-3d/build/windows -File
+          if ($files.Count -eq 0) { throw 'No output files' }
+      - name: Start the exported game
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exePath = (Resolve-Path az-car-3d/build/windows/AZCar3D.exe).Path
+          $logPath = Join-Path (Split-Path $exePath) 'runtime-smoke.log'
+          $process = Start-Process -FilePath $exePath -ArgumentList @('--headless','--quit-after','120','--log-file',$logPath) -WindowStyle Hidden -PassThru
+          if (-not $process.WaitForExit(120000)) { $process.Kill(); throw 'Exported game timed out' }
+          if ($process.ExitCode -ne 0) { throw 'Exported game failed to start' }
+          if (-not (Test-Path $logPath)) { throw 'Runtime log missing' }
+          if (Select-String -Path $logPath -Pattern 'SCRIPT ERROR|ERROR:') { Get-Content $logPath; throw 'Exported game runtime errors' }
+          Remove-Item -LiteralPath $logPath
+      - name: Package portable Windows game
+        shell: pwsh
+        run: |
+          Compress-Archive -Path az-car-3d/build/windows/* -DestinationPath AZCar3D-Akurana-Windows-x64.zip -Force
+          if ((Get-Item AZCar3D-Windows-x64.zip).Length -lt 1024) { throw 'ZIP unexpectedly small' }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path AZCar3D-Windows-x64.zip))
+          try {
+            foreach ($required in @('AZCar3D.exe','AZCar3D-Akurana.pck')) {
+              $entry = $archive.GetEntry($required)
+              if (-not $entry -or $entry.Length -eq 0) { throw "Missing or empty $required" }
+              $stream = $entry.Open()
+              try { $stream.CopyTo([System.IO.Stream]::Null) } finally { $stream.Dispose() }
+            }
+          } finally { $archive.Dispose() }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AZCar3D-Windows-x64-${{ github.sha }}
+          path: AZCar3D-Windows-x64.zip
+          if-no-files-found: error
