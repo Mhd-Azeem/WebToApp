@@ -2,7 +2,7 @@ name: AZ Car 3D Akurana Windows x64
 on:
   workflow_dispatch:
   push:
-    branches: [feature/az-car-3d-akurana-map]
+    branches: [feature/az-car-3d-akurana-map, fix/az-car-3d-akurana-ground]
     paths:
       - 'az-car-3d/**'
       - '.github/workflows/az-car-3d-akurana-windows.yml'
