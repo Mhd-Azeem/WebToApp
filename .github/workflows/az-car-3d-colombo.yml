@@ -8,7 +8,7 @@ permissions:
   contents: read
 concurrency:
   group: az-colombo-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   android:
     if: github.ref == 'refs/heads/feature/az-car-3d'
