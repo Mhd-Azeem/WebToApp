@@ -24,9 +24,9 @@ func _process(_delta: float) -> void:
 func _draw() -> void:
 	var w := size.x
 	var h := size.y
-	wheel_center=Vector2(w*0.48,h*0.64)
-	left_rect=Rect2(w*0.20,h*0.55,92,128)
-	right_rect=Rect2(w*0.72,h*0.55,92,128)
+	wheel_center=Vector2(w*0.60,h*0.65)
+	left_rect=Rect2(w*0.38,h*0.55,92,128)
+	right_rect=Rect2(w*0.79,h*0.55,92,128)
 	horn_rect=Rect2(wheel_center-Vector2(68,65),Vector2(136,130))
 	_draw_stalk(left_rect,"LIGHTS",headlights)
 	_draw_stalk(right_rect,"WIPERS",wipers)
@@ -68,7 +68,7 @@ func _begin(pos: Vector2) -> void:
 		dragging="horn"
 		horn_held=true
 		horn_changed.emit(true)
-	else: mouse_filter=Control.MOUSE_FILTER_PASS
+
 
 func _drag(pos: Vector2) -> void:
 	if dragging=="lights":
