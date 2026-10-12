@@ -20,8 +20,8 @@ var frequency := 0.0
 var audible_rpm := 800.0
 var engine_mix := 0.0
 # Boost perceived engine loudness while limiting peaks from simultaneous layers.
-const ENGINE_GAIN := 3.2
-const MASTER_HEADROOM := 0.96
+const ENGINE_GAIN = 3.2
+const MASTER_HEADROOM = 0.96
 var layer_weights := PackedFloat32Array()
 func _ready() -> void:
 	references=car.transmission.config.audio_references
