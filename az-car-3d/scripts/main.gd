@@ -88,7 +88,7 @@ func _ready() -> void:
 	ring.rings=16
 	ring.ring_segments=12
 	wheel.mesh=ring
-	wheel.position=Vector3(0,-0.29,-0.57)
+	wheel.position=Vector3(0.42,-0.29,-0.57)
 	wheel.rotation.x=0.0
 	wheel.material_override=G.material("",Color(0.045,0.045,0.05))
 	interior.add_child(wheel)
@@ -253,7 +253,7 @@ func _press(id: String, down: bool) -> void:
 	elif id=="regions": car.transmission.message="Playable: Colombo • Planned: Kandy hills / Galle coast / rural villages"
 
 func _input(event: InputEvent) -> void:
-	if settings.visible: return
+	if settings.visible and not (event is InputEventKey and event.pressed and event.keycode==KEY_ESCAPE): return
 	if event is InputEventKey and event.keycode==KEY_H and not event.pressed: car.horn=0.0
 	if event is InputEventKey and event.pressed and not event.echo:
 		var t = car.transmission
@@ -283,7 +283,7 @@ func _process(delta: float) -> void:
 	for i in range(wiper_parts.size()):
 		wiper_parts[i].rotation.z=(sin(wiper_phase)*0.65 if wipers_on else 0.0)*(1.0 if i==0 else -1.0)
 	if cockpit:
-		camera.global_position=car.to_global(Vector3(-0.42,1.58,0.5))
+		camera.global_position=car.to_global(Vector3(0.42,1.58,0.5))
 		camera.look_at(camera.global_position+car.global_basis.z*10,car.global_basis.y)
 		car.visual.visible=false
 	elif camera_mode==2:
@@ -311,6 +311,9 @@ func _process(delta: float) -> void:
 	settings.transmission_selector.select(t.mode)
 	for button in touch_buttons:
 		var id: String=button.get_meta("id")
+		if desktop_mode:
+			button.visible=false
+			continue
 		if id.begins_with("gear") or id=="clutch": button.visible=t.mode==0
 		if id.begins_with("auto"): button.visible=t.mode==1
 		if id in ["handbrake","start"]:
