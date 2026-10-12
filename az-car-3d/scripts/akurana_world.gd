@@ -51,10 +51,19 @@ func _finish(tool: SurfaceTool, material: Material, solid: bool) -> void:
 	add_child(instance)
 	if solid:
 		var body := StaticBody3D.new()
+		body.name = "TerrainOrRoadCollision"
 		var shape := CollisionShape3D.new()
-		shape.shape = mesh.create_trimesh_shape()
+		# Collision is intentionally two-sided: the 30 m DSM terrain mesh is a
+		# thin surface, and raycast vehicle wheels must hit it from above.
+		var collision_mesh := mesh.create_trimesh_shape()
+		collision_mesh.backface_collision = true
+		shape.shape = collision_mesh
+		body.collision_layer = 1
+		body.collision_mask = 1
 		body.add_child(shape)
-		instance.add_child(body)
+		# Keep physics geometry directly in the world tree and independent of
+		# the render mesh's visibility distance/LOD.
+		add_child(body)
 
 func _generate_terrain() -> void:
 	var tool := SurfaceTool.new()
