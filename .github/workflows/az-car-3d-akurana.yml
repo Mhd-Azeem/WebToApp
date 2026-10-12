@@ -1,7 +1,7 @@
 name: AZ Car 3D Akurana Preview APK
 on:
   push:
-    branches: [feature/az-car-3d-akurana-map]
+    branches: [feature/az-car-3d-akurana-map, fix/az-car-3d-akurana-ground]
     paths: ['az-car-3d/**', '.github/workflows/az-car-3d-akurana.yml']
   workflow_dispatch:
 permissions:
