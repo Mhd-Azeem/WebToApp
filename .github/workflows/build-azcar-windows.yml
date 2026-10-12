@@ -19,7 +19,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $version = '4.5-stable'
           $base = "https://github.com/godotengine/godot-builds/releases/download/$version"
-          Invoke-WebRequest "$base/Godot_v4.5-stable_win64_console.exe.zip" -OutFile godot.zip
+          Invoke-WebRequest "$base/Godot_v4.5-stable_win64.exe.zip" -OutFile godot.zip
           Expand-Archive godot.zip -DestinationPath godot
           Invoke-WebRequest "$base/Godot_v4.5-stable_export_templates.tpz" -OutFile templates.tpz
           Copy-Item templates.tpz templates.zip
