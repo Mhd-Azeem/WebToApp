@@ -1,0 +1,69 @@
+name: Publish AZ Car 3D Colombo preview
+on:
+  push:
+    branches: [feature/az-car-3d]
+    paths: ['.github/workflows/az-car-3d-publish.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: az-car-3d-colombo-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/feature/az-car-3d'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: ab1146f91f9158ace8c4a719add4fa5e82520270
+      SOURCE_RUN: '38180619606'
+      RELEASE_TAG: az-car-3d-v0.2.0-colombo
+    steps:
+      - name: Verify successful source build and download exact tested APK
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" > source-run.json
+          python3 - <<'PY'
+          import json, os
+          run = json.load(open('source-run.json'))
+          assert run['conclusion'] == 'success', 'Source build must have passed'
+          assert run['head_sha'] == os.environ['SOURCE_SHA'], 'Unexpected source commit'
+          assert run['head_branch'] == 'feature/az-car-3d', 'Unexpected source branch'
+          PY
+          gh run download "$SOURCE_RUN" --name AZ-Car-3D-Colombo-debug --dir release-artifact
+          test -s release-artifact/AZ-Car-3D-Colombo-debug.apk
+          cd release-artifact
+          sha256sum AZ-Car-3D-Colombo-debug.apk > SHA256SUMS.txt
+      - name: Publish isolated game prerelease
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'EOF'
+          Standalone AZ Car 3D Colombo playable preview (Godot 4.5.1).
+
+          Android APK: arm64, Android 7.0+ (min SDK 24), target SDK 35 / Android 15.
+          Download AZ-Car-3D-Colombo-debug.apk below and allow installation from your browser when Android prompts.
+
+          Includes a textured Colombo-inspired district with roads, crossings, buildings, seafront and collision; a controllable sedan; right-hand-drive cockpit; left-side driving conventions; five-speed manual with clutch, reverse and stalling; automatic P/R/N/D; native multitouch controls and quality presets. Rural scenery, Galle-style arcades and Kandy hills establish the hybrid Sri Lankan direction.
+
+          Verified: Godot imports/scripts, transmission checks, simultaneous touch injection, powered movement, road/barrier collisions, Android APK export and v2/v3 signing. This is the exact APK from successful Actions run 38180619606 at commit ab1146f91f9158ace8c4a719add4fa5e82520270; it is not rebuilt for this release.
+
+          This is a debug-signed preview, not a production release. Physical Nubia V70 Max testing, GPU performance, safe areas and sustained frame times remain unverified. Full regional maps, AI traffic and richer art are future work. No GTA V-equivalent fidelity claim.
+
+          First drive: hold CLUTCH, select 1, press GAS and release CLUTCH. For automatic, stop, tap MT / AT, hold BRAKE and select D. Use CAMERA for cockpit/chase, RESET for recovery, and LOW quality first.
+
+          Existing WebToApp files, workflows and releases are preserved. The game uses com.azeem.azcar3d.colombo, a separate application ID. No laptop or PowerShell steps are required to install this preview. If an older build has a different signing certificate, uninstall that game build before installing; do not uninstall WebToApp.
+
+          Asset provenance and limitations: az-car-3d/docs/ASSET_CREDITS.md and az-car-3d/docs/VALIDATION.md on the game branch. SHA256SUMS.txt provides the APK checksum.
+          EOF
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            echo 'This release already exists; refusing to overwrite its assets.'
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" --target "$SOURCE_SHA" --draft --prerelease --latest=false --title 'AZ Car 3D — Colombo Preview v0.2.0' --notes-file release-notes.md release-artifact/AZ-Car-3D-Colombo-debug.apk release-artifact/SHA256SUMS.txt
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
