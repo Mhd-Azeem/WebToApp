@@ -28,7 +28,7 @@ var wiper_phase := 0.0
 func _ready() -> void:
 	desktop_mode=OS.has_feature("windows") or OS.has_feature("linux") or OS.has_feature("macos")
 	var world := Node3D.new()
-	world.set_script(preload("res://scripts/world.gd"))
+	world.set_script(_world_script())
 	add_child(world)
 	car=VehicleBody3D.new()
 	car.set_script(preload("res://scripts/car.gd"))
@@ -92,6 +92,9 @@ func _ready() -> void:
 	_apply_quality(settings.quality_toggle.button_pressed)
 	if settings.saved.get_value("driving","automatic",false): car.transmission.toggle(0)
 	settings.transmission_selector.select(car.transmission.mode)
+
+func _world_script() -> Script:
+	return preload("res://scripts/world.gd")
 
 func _hud() -> void:
 	var layer := CanvasLayer.new()
