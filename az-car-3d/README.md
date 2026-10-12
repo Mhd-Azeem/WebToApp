@@ -80,3 +80,7 @@ No claim of GTA V fidelity. Current scenery is a textured modular vertical slice
 see `docs/VALIDATION.md` for actual checks and outstanding work.
 
 Driving update: open the gear icon for saved traffic and performance settings. Traffic is off by default. Reverse shows a rear-camera inset. Gear limits are 40 / 60 / 80 / 120 / 220 km/h. See docs/DRIVING_UPDATE.md. Every successful branch build refreshes the az-car-3d-latest GitHub release APK.
+
+v0.5 adds more sensitive steering, the player coupe in eight traffic colors,
+rolling terrain, hills, trees, shrubs, rocks, city parks, beach and sea. See
+docs/LANDSCAPE_UPDATE.md for the generated scenery and mobile rendering limits.

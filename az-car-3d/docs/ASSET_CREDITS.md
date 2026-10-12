@@ -24,3 +24,7 @@ manufacturer logos or third-party car models.
 Engine, starter, horn, shift, rev-drop, brake and tire sounds are original
 procedural synthesis in scripts/engine_audio.gd. No audio recordings or external
 audio assets are redistributed. Hood dials are original Godot vector drawings.
+
+The v0.5 shared coupe, colored traffic variants, generated terrain, tree and
+shrub meshes, rock shapes, park paths and benches are original procedural art.
+No external vegetation, terrain or car models were downloaded or redistributed.

@@ -1,4 +1,5 @@
 extends Node3D
+const Coupe = preload("res://scripts/coupe_visual.gd")
 const G = preload("res://scripts/geometry.gd")
 const ROUTE: Array[Vector3] = [Vector3(-99.5,0,-963.5),Vector3(99.5,0,-963.5),Vector3(99.5,0,963.5),Vector3(-99.5,0,963.5)]
 var player: VehicleBody3D
@@ -30,11 +31,11 @@ func _spawn() -> void:
 		shape.shape=box
 		shape.position.y=0.85
 		body.add_child(shape)
-		var paint := G.material("",Color.from_hsv(float(i)/8,0.4,0.7))
-		G.box(body,Vector3(0,0.65,0),Vector3(1.8,0.7,4.1),paint)
-		G.box(body,Vector3(0,1.15,-0.1),Vector3(1.5,0.6,2.0),G.material("",Color(0.07,0.13,0.18)))
-		for x in [-0.95,0.95]:
-			for z in [-1.3,1.3]: G.box(body,Vector3(x,0.3,z),Vector3(0.18,0.6,0.6),G.material("",Color(0.025,0.025,0.025)))
+		var color := Color.from_hsv(float(i)/8,0.70,0.82)
+		var model := Coupe.traffic_model(body,color)
+		model.position.y=-0.10
+		model.set_meta("coupe",true)
+		model.set_meta("paint",color)
 		vehicles.append(body)
 		targets.append((segment+1)%4)
 		speeds.append(0.0)
@@ -59,3 +60,4 @@ func _physics_process(delta: float) -> void:
 		if is_instance_valid(player) and body.position.distance_to(player.position)<9: desired=0
 		speeds[i]=move_toward(speeds[i],desired,delta*(8 if desired==0 else 2))
 		body.move_and_collide(direction*speeds[i]*delta)
+

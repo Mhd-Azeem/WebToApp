@@ -181,6 +181,21 @@ func world_test() -> void:
 	await physics_frame
 	await physics_frame
 	check(scene.traffic.enabled and scene.traffic.vehicles.size()==8,"Settings enables bounded traffic")
+	var colors := {}
+	for body in scene.traffic.vehicles:
+		var models: Array = body.get_children().filter(func(child: Node): return child.has_meta("coupe"))
+		check(models.size()==1,"Traffic uses shared player coupe artwork")
+		if models.size()==1:
+			colors[str(models[0].get_meta("paint"))]=true
+			check(models[0].find_children("*","MeshInstance3D",true,false).size()<20,"Detailed traffic model merged for bounded draw calls")
+			var painted := 0
+			for mesh_node in models[0].find_children("*","MeshInstance3D",true,false):
+				if mesh_node.has_meta("body_paint"):
+					painted+=1
+					var mat: StandardMaterial3D=mesh_node.material_override if mesh_node.material_override!=null else mesh_node.mesh.surface_get_material(0)
+					check(mat.albedo_color.is_equal_approx(models[0].get_meta("paint")),"Shared traffic geometry retains individual paint color")
+			check(painted==1,"One merged paint surface per traffic coupe")
+	check(colors.size()==8,"Eight different traffic paint colors")
 	var before: Vector3=scene.traffic.vehicles[0].position
 	for i in range(60): await physics_frame
 	check(scene.traffic.vehicles[0].position.distance_to(before)>0.1,"Traffic moves along connected roads")
@@ -222,6 +237,24 @@ func world_test() -> void:
 	check(max_kph>200,"Powered fifth gear physically exceeds 200 km/h")
 	check(scene.car.position.y>-1,"High-speed road collision supports car")
 	print("High-speed drive peak: ",max_kph," km/h, gear ",scene.car.transmission.auto_gear,", position ",scene.car.position)
+	var landscape = scene.find_child("Landscape",true,false)
+	check(landscape!=null and landscape.tree_count>100 and landscape.terrain_count>150,"Trees and terrain cover extended world")
+	var hill: Vector3=Vector3(305.2,0,507.3)
+	hill.y=landscape.height_at(hill.x,hill.z)
+	var terrain_hit: Dictionary = scene.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(hill+Vector3(0,15,0),hill-Vector3(0,5,0)))
+	check(not terrain_hit.is_empty(),"Off-road terrain has collision")
+	# Measure steering response under real physics, with parking holding position.
+	scene.car.reset()
+	scene.car.transmission.mode=T.Mode.AUTOMATIC
+	scene.car.transmission.selector="P"
+	scene.car.gas=0
+	scene.car.turn=1
+	for i in range(6): await physics_frame
+	check(scene.car.steering>0.25,"Steering responds within 100 ms")
+	scene.car.turn=0
+	for i in range(12): await physics_frame
+	check(absf(scene.car.steering)<0.05,"Steering returns promptly to center")
+	print("Shared coupe / landscape / steering checks: ","PASS" if failures==0 else "FAIL")
 	scene.queue_free()
 	await process_frame
 	quit(1 if failures else 0)

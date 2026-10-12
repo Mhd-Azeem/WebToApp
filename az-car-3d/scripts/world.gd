@@ -86,6 +86,11 @@ Future coastal district",Vector3(96,5,181),25).rotation.y=PI
 	var extension := Node3D.new()
 	extension.set_script(preload("res://scripts/road_extension.gd"))
 	add_child(extension)
+	var landscape := Node3D.new()
+	landscape.name="Landscape"
+	landscape.set_script(preload("res://scripts/landscape.gd"))
+	add_child(landscape)
+	_batch_geometry(landscape)
 	_batch_geometry(extension)
 	landmark_count = 4
 	_batch_geometry()

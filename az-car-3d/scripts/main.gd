@@ -42,11 +42,21 @@ func _ready() -> void:
 	add_child(sun)
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
+	e.fog_enabled=true
+	e.fog_mode=Environment.FOG_MODE_DEPTH
+	e.fog_density=1.0
+	e.fog_sky_affect=0.0
+	e.fog_light_color=Color(0.48,0.58,0.62)
+	e.fog_light_energy=0.8
+	e.fog_depth_begin=130
+	e.fog_depth_end=185
 	e.background_mode=Environment.BG_SKY
 	var sky := Sky.new()
 	var sky_mat := ProceduralSkyMaterial.new()
 	sky_mat.sky_top_color=Color(0.26,0.48,0.70)
 	sky_mat.sky_horizon_color=Color(0.78,0.83,0.83)
+	sky_mat.ground_horizon_color=sky_mat.sky_horizon_color
+	sky_mat.ground_bottom_color=Color(0.24,0.31,0.23)
 	sky.sky_material=sky_mat
 	e.sky=sky
 	e.ambient_light_source=Environment.AMBIENT_SOURCE_COLOR
@@ -246,6 +256,8 @@ func _apply_quality(low: bool) -> void:
 	sun.shadow_enabled=not low
 	Engine.max_fps=30 if low else 60
 	camera.far=190 if low else 260
+	get_world_3d().environment.fog_depth_end=185 if low else 255
+	get_world_3d().environment.fog_depth_begin=130 if low else 185
 	get_viewport().msaa_3d=Viewport.MSAA_DISABLED if low else Viewport.MSAA_2X
 
 func _notification(what: int) -> void:

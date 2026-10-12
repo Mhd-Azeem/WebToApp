@@ -103,6 +103,8 @@ jobs:
 
           v0.4 driving update: improved steering return and high-speed stability, stronger brakes and easier clutch engagement; gear limits 40 / 60 / 80 / 120 / 220 km/h; saved Settings traffic toggle with eight collision-aware vehicles; automatic rear-camera inset in both manual and automatic reverse. Performance mode disables antialiasing and shortens viewing distance. Rear view is capped at 15 FPS and stops rendering outside reverse.
 
+          v0.5 landscape update: faster, more sensitive steering; traffic uses the same detailed coupe as the player in eight paint colors; rolling grass terrain and hills with collision, sandy coast and sea, sidewalk and roadside trees, shrubs, rocks, parks, paths and benches. Shared and merged meshes plus spatial vegetation batches limit rendering overhead.
+
           Camera button / V cycles chase, cockpit and hood. Speaker button / H holds the horn. Hold clutch to shift manually; stop and hold brake to select automatic D. Start with LOW quality.
 
           Godot validation, transmission/multitouch/road collision tests, Android export and APK signature verification must pass before publication. Device performance and audio quality still require physical Android testing. SHA256SUMS.txt contains the APK checksum.
