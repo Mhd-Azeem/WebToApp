@@ -17,6 +17,8 @@ var traffic: Node3D
 var settings: PanelContainer
 var rear_view: Node
 var pedals := {}
+var desktop_mode := false
+var desktop_help: Label
 
 func _ready() -> void:
 	var world := Node3D.new()
@@ -86,6 +88,7 @@ func _ready() -> void:
 	wheel.material_override=G.material("",Color(0.045,0.045,0.05))
 	interior.add_child(wheel)
 	G.box(interior,Vector3(-0.57,-0.4,-0.68),Vector3(0.13,0.23,0.1),G.material("",Color(0.13,0.14,0.15)))
+	_build_desktop_cockpit()
 	interior.visible=false
 	_hud()
 	traffic.set_enabled(settings.traffic_toggle.button_pressed)
@@ -146,6 +149,11 @@ func _hud() -> void:
 	_touch(layer,Vector2(94,100),Vector2(58,58),"regions")
 	_touch(layer,Vector2(164,100),Vector2(58,58),"horn")
 	_touch(layer,Vector2(234,100),Vector2(58,58),"settings")
+	if desktop_mode:
+		for button in touch_buttons: button.visible=false
+		for pedal in pedals.values(): pedal.visible=false
+		shifter.visible=false
+		_desktop_controls(layer)
 	# Settings stays above all driving overlays when opened.
 	layer.move_child(settings,layer.get_child_count()-1)
 
@@ -243,9 +251,10 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		var t = car.transmission
 		if event.keycode==KEY_M: t.toggle(car.signed_speed)
-		elif event.keycode==KEY_V: camera_mode=(camera_mode+1)%3
+		elif event.keycode==KEY_C or event.keycode==KEY_V: camera_mode=(camera_mode+1)%3
 		elif event.keycode==KEY_E: t.start_stop()
 		elif event.keycode==KEY_SPACE: car.handbrake=1-car.handbrake
+		elif event.keycode==KEY_ESCAPE: settings.visible=not settings.visible
 		elif event.keycode==KEY_P: t.select("P",car.signed_speed,float(Input.is_key_pressed(KEY_S)))
 		elif event.keycode==KEY_R:
 			if t.mode==0: t.shift(-1,car.signed_speed)
@@ -283,9 +292,9 @@ func _process(delta: float) -> void:
 	var lug := clampf((car.transmission.config.idle_rpm-t.rpm)/300,0,1) if t.running else 0.0
 	camera.global_position+=car.global_basis.y*sin(t.engine.clock*70)*lug*0.012
 	hud.text="%s · %d km/h · %d RPM · %s · %d FPS\nClutch %d%% · Load %d%% · %s\n%s" % [t.display(),roundi(car.linear_velocity.length()*3.6),roundi(t.rpm),t.engine.status(),Engine.get_frames_per_second(),roundi(t.clutch*100),roundi(absf(t.engine.load)*100),"HANDBRAKE" if car.handbrake>0 else ("LOW" if low_quality else "HIGH"),t.message]
-	shifter.visible=t.mode==0
+	shifter.visible=t.mode==0 and not desktop_mode
 	if t.mode!=0 and pedals.clutch.visible: pedals.clutch.cancel()
-	pedals.clutch.visible=t.mode==0
+	pedals.clutch.visible=t.mode==0 and not desktop_mode
 	settings.transmission_selector.select(t.mode)
 	for button in touch_buttons:
 		var id: String=button.get_meta("id")
@@ -312,3 +321,46 @@ func _notification(what: int) -> void:
 		get_tree().paused=true
 	elif what==NOTIFICATION_APPLICATION_FOCUS_IN: get_tree().paused=false
 
+
+func _desktop_controls(layer: CanvasLayer) -> void:
+	var bar := HBoxContainer.new()
+	bar.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	bar.position=Vector2(865,14)
+	layer.add_child(bar)
+	var transmission_button := Button.new()
+	transmission_button.text="Manual / Automatic (M)"
+	bar.add_child(transmission_button)
+	transmission_button.pressed.connect(func():
+		if car.transmission.toggle(car.signed_speed):
+			settings._save("automatic",car.transmission.mode==1)
+		settings.transmission_selector.select(car.transmission.mode))
+	var settings_button := Button.new()
+	settings_button.text="Settings (Esc)"
+	bar.add_child(settings_button)
+	settings_button.pressed.connect(func(): settings.visible=not settings.visible)
+	desktop_help=Label.new()
+	desktop_help.position=Vector2(18,682)
+	desktop_help.add_theme_font_size_override("font_size",13)
+	desktop_help.add_theme_color_override("font_color",Color(0.94,0.97,1))
+	layer.add_child(desktop_help)
+
+func _build_desktop_cockpit() -> void:
+	if not desktop_mode: return
+	var dark := G.material("",Color(0.045,0.052,0.065))
+	var trim := G.material("",Color(0.23,0.26,0.29))
+	var leather := G.material("",Color(0.08,0.085,0.09))
+	# Camera-space interior: dashboard, windshield surround, door panels and center stack.
+	G.box(interior,Vector3(0,-0.55,-1.05),Vector3(2.8,0.28,0.72),dark)
+	G.box(interior,Vector3(0,-0.38,-1.24),Vector3(2.8,0.045,0.18),trim)
+	G.box(interior,Vector3(-1.26,0.22,-1.05),Vector3(0.14,1.55,0.19),dark)
+	G.box(interior,Vector3(1.26,0.22,-1.05),Vector3(0.14,1.55,0.19),dark)
+	G.box(interior,Vector3(0,0.97,-1.06),Vector3(2.5,0.13,0.22),dark)
+	G.box(interior,Vector3(-1.04,-0.61,-0.59),Vector3(0.52,0.46,0.68),leather)
+	G.box(interior,Vector3(1.04,-0.61,-0.59),Vector3(0.52,0.46,0.68),leather)
+	G.box(interior,Vector3(0.80,-0.52,-0.74),Vector3(0.55,0.39,0.11),trim)
+	G.box(interior,Vector3(0.80,-0.52,-0.67),Vector3(0.47,0.31,0.025),dark)
+	G.box(interior,Vector3(0,-0.32,-0.63),Vector3(0.27,0.22,0.10),leather)
+	for x in [-0.31,0.31]:
+		G.box(interior,Vector3(x,-0.34,-0.64),Vector3(0.31,0.055,0.06),trim)
+	for x in [-0.88,0.88]:
+		G.box(interior,Vector3(x,-0.42,-0.72),Vector3(0.36,0.10,0.09),trim)
