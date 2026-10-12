@@ -139,6 +139,7 @@ func world_test() -> void:
 		for x in [-96.0,-48.0,0.0,48.0,96.0]:
 			var ray := PhysicsRayQueryParameters3D.create(Vector3(x,3,z),Vector3(x,-1,z))
 			check(not space.intersect_ray(ray).is_empty(),"Cross-road loop collision")
+	scene.camera_mode=0 # Camera cycle test starts from chase, independent of cockpit-first startup.
 	scene._press("camera",true)
 	check(scene.camera_mode==1,"Cockpit retained in camera cycle")
 	scene._press("camera",true)
