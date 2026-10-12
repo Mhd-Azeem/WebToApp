@@ -2,7 +2,7 @@ config_version=5
 [application]
 config/icon="res://assets/icon.svg"
 config/name="AZ Car 3D — Sri Lanka"
-run/main_scene="res://scenes/main.tscn"
+run/main_scene="res://scenes/akurana.tscn"
 config/features=PackedStringArray("4.5", "GL Compatibility")
 [display]
 window/size/viewport_width=1280
