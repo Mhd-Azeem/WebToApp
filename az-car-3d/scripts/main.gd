@@ -4,7 +4,7 @@ var car: VehicleBody3D
 var camera: Camera3D
 var hud: Label
 var cockpit := false
-var camera_mode := 0
+var camera_mode := 1
 var gauges: Node2D
 var low_quality := true
 var touch_buttons: Array[TouchScreenButton] = []
