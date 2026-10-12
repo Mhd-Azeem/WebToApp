@@ -20,8 +20,8 @@ var frequency := 0.0
 var audible_rpm := 800.0
 var engine_mix := 0.0
 # Boost perceived engine loudness while limiting peaks from simultaneous layers.
-const ENGINE_GAIN := 1.9
-const MASTER_HEADROOM := 0.90
+const ENGINE_GAIN := 3.2
+const MASTER_HEADROOM := 0.96
 var layer_weights := PackedFloat32Array()
 func _ready() -> void:
 	references=car.transmission.config.audio_references
@@ -33,6 +33,7 @@ func _ready() -> void:
 	starter=_player(_stream("starter",0,1.5,true))
 	shift_sound=_player(_stream("shift",0,0.12,false),false)
 	grind_sound=_player(_stream("grind",0,0.22,false),false)
+	grind_sound.volume_db=-80 # Kept for compatibility; do not play abrasive grinding audio.
 	lifecycle=_player(_stream("stall",0,0.4,false),false)
 	ignition=_player(_stream("ignition",0,0.10,false),false)
 	last_ignition=car.transmission.engine.ignition_serial
@@ -69,7 +70,7 @@ static func _stream(kind: String,hz: float,duration: float,looping: bool) -> Aud
 		elif kind=="skid": v=filtered*0.04 # No high-frequency tire squeal
 		elif kind=="shift": v=filtered*0.65*exp(-time*28)+sin(TAU*250*time)*0.1*exp(-time*40)
 		elif kind=="ignition": v=filtered*0.5*exp(-time*45)
-		elif kind=="grind": v=n*0.23+sin(TAU*180*time)*0.12
+		elif kind=="grind": v=0.0 # Silent rather than screeching
 		elif kind=="stall" or kind=="shutdown": v=sin(TAU*(40*time-30*time*time))*0.25*exp(-time*8)+filtered*0.08
 		else: v=filtered*0.5
 		# Noise loops have short edge fades; the harmonic engine loops have
@@ -106,7 +107,7 @@ func _process(delta: float) -> void:
 	audible_rpm=lerpf(audible_rpm,maxf(100,e.rpm),1-exp(-delta*18))
 	frequency=audible_rpm*car.transmission.config.engine_cylinders/120.0
 	var load := clampf(absf(e.load),0,1)
-	engine_mix=(0.32+load*0.42+e.throttle*0.22) if e.running else 0.0
+	engine_mix=(0.60+load*0.28+e.throttle*0.12) if e.running else 0.0
 	if e.ignition_cut: engine_mix*=0.06
 	for i in range(layers.size()):
 		var weight := 0.0
@@ -125,8 +126,7 @@ func _process(delta: float) -> void:
 		shift_sound.play()
 	if t.grind_serial!=last_grind:
 		last_grind=t.grind_serial
-		grind_sound.volume_db=-16
-		grind_sound.play()
+		pass # Rejected gear changes retain the dashboard message; no screech.
 	if e.stall_serial!=last_stall or e.shutdown_serial!=last_shutdown:
 		var stalled: bool=e.stall_serial!=last_stall
 		last_stall=e.stall_serial
@@ -137,9 +137,9 @@ func _process(delta: float) -> void:
 	last_ignition=e.ignition_serial
 	var speed := car.linear_velocity.length()
 	var road := clampf(speed/45,0,1) if car.wheel_physics.grounded else 0.0
-	_volume(noises.rolling,road*0.45,delta)
+	_volume(noises.rolling,road*0.24,delta)
 	noises.rolling.pitch_scale=clampf(speed/16,0.5,2.0)
-	_volume(noises.wind,pow(clampf(speed/65,0,1),1.7)*0.24,delta)
-	_volume(noises.brake,car.effective_brake*clampf((speed-1)/12,0,1)*0.07,delta)
+	_volume(noises.wind,pow(clampf(speed/65,0,1),1.7)*0.10,delta)
+	_volume(noises.brake,0.0,delta) # Remove sharp brake hiss/squeal
 	// Tire squeal disabled: retain traction/skid physics without the irritating screech.
 	_volume(noises.horn,0.8 if car.horn>0 or Input.is_key_pressed(KEY_H) else 0.0,delta,25)
