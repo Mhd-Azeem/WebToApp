@@ -19,13 +19,16 @@ var last_shutdown := 0
 var frequency := 0.0
 var audible_rpm := 800.0
 var engine_mix := 0.0
+# Boost perceived engine loudness while limiting peaks from simultaneous layers.
+const ENGINE_GAIN := 1.9
+const MASTER_HEADROOM := 0.90
 var layer_weights := PackedFloat32Array()
 func _ready() -> void:
 	references=car.transmission.config.audio_references
 	layer_weights.resize(references.size())
 	for i in range(references.size()):
 		layers.append(_player(_stream("engine"+str(i),references[i]*car.transmission.config.engine_cylinders/120.0,1.5,true)))
-	for kind in ["rolling","wind","skid","brake","horn"]:
+	for kind in ["rolling","wind","brake","horn"]:
 		noises[kind]=_player(_stream(kind,0,1.5,true))
 	starter=_player(_stream("starter",0,1.5,true))
 	shift_sound=_player(_stream("shift",0,0.12,false),false)
@@ -63,7 +66,7 @@ static func _stream(kind: String,hz: float,duration: float,looping: bool) -> Aud
 			v+=sin(phase*4)*(0.012+index*0.012)+sin(phase*6)*index*0.008
 		elif kind=="horn": v=(sin(TAU*440*time)+sin(TAU*554*time))*0.16
 		elif kind=="starter": v=sin(TAU*45*time)*0.1+sin(TAU*130*time)*0.08+filtered*0.12
-		elif kind=="skid": v=sin(TAU*1450*time)*0.13+filtered*0.15
+		elif kind=="skid": v=filtered*0.04 # No high-frequency tire squeal
 		elif kind=="shift": v=filtered*0.65*exp(-time*28)+sin(TAU*250*time)*0.1*exp(-time*40)
 		elif kind=="ignition": v=filtered*0.5*exp(-time*45)
 		elif kind=="grind": v=n*0.23+sin(TAU*180*time)*0.12
@@ -87,7 +90,7 @@ static func _stream(kind: String,hz: float,duration: float,looping: bool) -> Aud
 	cache[key]=stream
 	return stream
 func _volume(p: AudioStreamPlayer,target: float,delta: float,rate: float = 14.0) -> void:
-	target*=0.72 # Reserve headroom for simultaneous horn, tires and mechanical events.
+	target=clampf(target*MASTER_HEADROOM,0.0,0.92) # Keep individual layers below full scale.
 	var gain := db_to_linear(p.volume_db)
 	gain=lerpf(gain,target,1-exp(-delta*rate))
 	p.volume_db=linear_to_db(maxf(0.00001,gain))
@@ -113,7 +116,7 @@ func _process(delta: float) -> void:
 		elif i>0 and audible_rpm<=references[i]: weight=clampf((audible_rpm-references[i-1])/(references[i]-references[i-1]),0,1)
 		layer_weights[i]=weight
 		layers[i].pitch_scale=clampf(audible_rpm/references[i],0.25,4)
-		_volume(layers[i],weight*engine_mix,delta,35 if e.ignition_cut else 14)
+		_volume(layers[i],weight*engine_mix*ENGINE_GAIN,delta,35 if e.ignition_cut else 14)
 	_volume(starter,0.75 if e.state==1 else 0.0,delta)
 	starter.pitch_scale=clampf(maxf(150,e.rpm)/400,0.5,1.7)
 	if t.shift_serial!=last_shift:
@@ -122,7 +125,7 @@ func _process(delta: float) -> void:
 		shift_sound.play()
 	if t.grind_serial!=last_grind:
 		last_grind=t.grind_serial
-		grind_sound.volume_db=-8
+		grind_sound.volume_db=-16
 		grind_sound.play()
 	if e.stall_serial!=last_stall or e.shutdown_serial!=last_shutdown:
 		var stalled: bool=e.stall_serial!=last_stall
@@ -136,7 +139,7 @@ func _process(delta: float) -> void:
 	var road := clampf(speed/45,0,1) if car.wheel_physics.grounded else 0.0
 	_volume(noises.rolling,road*0.45,delta)
 	noises.rolling.pitch_scale=clampf(speed/16,0.5,2.0)
-	_volume(noises.wind,pow(clampf(speed/65,0,1),1.7)*0.65,delta)
-	_volume(noises.brake,car.effective_brake*clampf((speed-1)/12,0,1)*0.22,delta)
-	_volume(noises.skid,car.wheel_physics.skid*clampf(speed/8,0,1)*0.8,delta)
+	_volume(noises.wind,pow(clampf(speed/65,0,1),1.7)*0.24,delta)
+	_volume(noises.brake,car.effective_brake*clampf((speed-1)/12,0,1)*0.07,delta)
+	// Tire squeal disabled: retain traction/skid physics without the irritating screech.
 	_volume(noises.horn,0.8 if car.horn>0 or Input.is_key_pressed(KEY_H) else 0.0,delta,25)
