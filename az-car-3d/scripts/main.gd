@@ -356,7 +356,6 @@ func _desktop_controls(layer: CanvasLayer) -> void:
 	layer.add_child(desktop_help)
 
 func _build_desktop_cockpit() -> void:
-	if not desktop_mode: return
 	var dark := G.material("",Color(0.045,0.052,0.065))
 	var trim := G.material("",Color(0.23,0.26,0.29))
 	var leather := G.material("",Color(0.08,0.085,0.09))
