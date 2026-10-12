@@ -305,7 +305,7 @@ func _process(delta: float) -> void:
 	camera.global_position+=car.global_basis.y*sin(t.engine.clock*70)*lug*0.012
 	hud.text="%s · %d km/h · %d RPM · %s · %d FPS\nClutch %d%% · Load %d%% · %s\n%s" % [t.display(),roundi(car.linear_velocity.length()*3.6),roundi(t.rpm),t.engine.status(),Engine.get_frames_per_second(),roundi(t.clutch*100),roundi(absf(t.engine.load)*100),"HANDBRAKE" if car.handbrake>0 else ("LOW" if low_quality else "HIGH"),t.message]
 	shifter.visible=t.mode==0 and not desktop_mode
-	cockpit_overlay.visible=cockpit and not settings.visible
+	if is_instance_valid(cockpit_overlay): cockpit_overlay.visible=cockpit and not settings.visible
 	if t.mode!=0 and pedals.clutch.visible: pedals.clutch.cancel()
 	pedals.clutch.visible=t.mode==0 and not desktop_mode
 	settings.transmission_selector.select(t.mode)
