@@ -242,7 +242,7 @@ func _press(id: String, down: bool) -> void:
 		shifter.cancel()
 	elif id=="quality":
 		settings.quality_toggle.button_pressed=not low_quality
-	elif id=="regions": car.transmission.message="Playable: Colombo • Planned: Kandy hills / Galle coast / rural villages"
+	elif id=="regions": car.transmission.message="Playable: Colombo â€¢ Planned: Kandy hills / Galle coast / rural villages"
 
 func _input(event: InputEvent) -> void:
 	if settings.visible and not (event is InputEventKey and event.pressed and event.keycode==KEY_ESCAPE): return
@@ -297,7 +297,7 @@ func _process(delta: float) -> void:
 	var t = car.transmission
 	var lug := clampf((car.transmission.config.idle_rpm-t.rpm)/300,0,1) if t.running else 0.0
 	camera.global_position+=car.global_basis.y*sin(t.engine.clock*70)*lug*0.012
-	hud.text="%s · %d km/h · %d RPM · %s · %d FPS\nClutch %d%% · Load %d%% · %s\n%s" % [t.display(),roundi(car.linear_velocity.length()*3.6),roundi(t.rpm),t.engine.status(),Engine.get_frames_per_second(),roundi(t.clutch*100),roundi(absf(t.engine.load)*100),"HANDBRAKE" if car.handbrake>0 else ("LOW" if low_quality else "HIGH"),t.message]
+	hud.text="%s Â· %d km/h Â· %d RPM Â· %s Â· %d FPS\nClutch %d%% Â· Load %d%% Â· %s\n%s" % [t.display(),roundi(car.linear_velocity.length()*3.6),roundi(t.rpm),t.engine.status(),Engine.get_frames_per_second(),roundi(t.clutch*100),roundi(absf(t.engine.load)*100),"HANDBRAKE" if car.handbrake>0 else ("LOW" if low_quality else "HIGH"),t.message]
 	shifter.visible=t.mode==0 and not desktop_mode
 	if is_instance_valid(cockpit_overlay): cockpit_overlay.visible=cockpit and not settings.visible
 	if t.mode!=0 and pedals.clutch.visible: pedals.clutch.cancel()
@@ -324,13 +324,13 @@ func _apply_quality(low: bool) -> void:
 	get_viewport().msaa_3d=Viewport.MSAA_DISABLED if low else Viewport.MSAA_2X
 
 func _notification(what: int) -> void:
-	if what==NOTIFICATION_APPLICATION_FOCUS_OUT and is_instance_valid(car):
+	if what in [NOTIFICATION_APPLICATION_FOCUS_OUT,NOTIFICATION_APPLICATION_PAUSED] and is_instance_valid(car):
 		held.clear()
 		if is_instance_valid(shifter): shifter.cancel()
 		car.release_controls()
 		for pedal in pedals.values(): pedal.cancel()
 		get_tree().paused=true
-	elif what==NOTIFICATION_APPLICATION_FOCUS_IN: get_tree().paused=false
+	elif what in [NOTIFICATION_APPLICATION_FOCUS_IN,NOTIFICATION_APPLICATION_RESUMED]: get_tree().paused=false
 
 
 func _desktop_controls(layer: CanvasLayer) -> void:

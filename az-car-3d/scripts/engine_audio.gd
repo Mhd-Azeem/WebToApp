@@ -158,4 +158,4 @@ func _process(delta: float) -> void:
 	_volume(noises.wind,pow(clampf(speed/65,0,1),1.7)*0.10,delta)
 	_volume(noises.brake,0.0,delta) # Remove sharp brake hiss/squeal
 	# Tire squeal disabled: retain traction/skid physics without the irritating screech.
-	_volume(noises.horn,0.8 if car.horn>0 or Input.is_key_pressed(KEY_H) else 0.0,delta,25)
+	_volume(noises.horn,0.8 if car.horn>0 and car.controls_enabled else 0.0,delta,25)

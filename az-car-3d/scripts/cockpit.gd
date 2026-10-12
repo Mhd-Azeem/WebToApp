@@ -44,7 +44,7 @@ func _ready() -> void:
 	G.profile_mesh(self,[[-0.87,0.24,-1.1,-0.39],[-0.70,0.22,-1.07,-0.43],[-0.55,0.20,-1.0,-0.69]],leather).position.x=0.65
 	G.box(self,Vector3(0.58,-0.26,-0.82),Vector3(0.35,0.19,0.025),trim)
 	G.box(self,Vector3(0.58,-0.26,-0.80),Vector3(0.32,0.16,0.018),rubber)
-	var screen := G.label(self,"AZ CONNECT\nCOLOMBO  •  24°C",Vector3(0.58,-0.26,-0.78),22)
+	var screen := G.label(self,"AZ CONNECT\nCOLOMBO  â€¢  24Â°C",Vector3(0.58,-0.26,-0.78),22)
 	screen.pixel_size=0.0016
 	screen.outline_size=0
 	screen.modulate=Color(0.38,0.8,0.9)
@@ -57,7 +57,7 @@ func _ready() -> void:
 		G.profile_mesh(self,[[-1.02,0.09,-0.85,-0.32],[-0.55,0.11,-0.92,-0.38],[0.15,0.09,-0.95,-0.47]],leather).position.x=x
 		G.box(self,Vector3(x,-0.59,-0.36),Vector3(0.10,0.06,0.40),trim)
 	G.box(self,Vector3(0.4,0.69,-1.10),Vector3(2.5,0.08,0.15),leather)
-	G.box(self,Vector3(0.40,0.38,-1.05),Vector3(0.28,0.10,0.045),rubber)
+	var interior_mirror := G.box(self,Vector3(0.40,0.38,-1.05),Vector3(0.28,0.10,0.045),rubber)
 	# Natural 370 mm wheel; tilted mounting and rotation are separate transforms.
 	var mount := Node3D.new()
 	add_child(mount)
@@ -132,6 +132,20 @@ func _ready() -> void:
 		lamp.light_energy=2
 		lamp.visible=false
 		lamps.append(lamp)
+	var rear_vp := SubViewport.new()
+	rear_vp.world_3d=vehicle.get_world_3d()
+	rear_vp.audio_listener_enable_3d=false
+	rear_vp.render_target_update_mode=SubViewport.UPDATE_DISABLED
+	add_child(rear_vp)
+	var rear_cam := Camera3D.new()
+	rear_cam.cull_mask=5
+	rear_cam.fov=70
+	rear_cam.far=120
+	rear_vp.add_child(rear_cam)
+	rear_cam.current=true
+	mirrors.append(rear_vp)
+	mirror_cameras.append(rear_cam)
+	surface(interior_mirror,Vector3(0,0,0.024),Vector2(0.25,0.075),rear_vp.get_texture(),true)
 	# All camera-space geometry is invisible to mirror cameras (layer 2).
 	for mesh in find_children("*","GeometryInstance3D",true,false): mesh.layers=2
 	set_quality(low_quality)
@@ -201,8 +215,8 @@ func _process(delta: float) -> void:
 	for i in range(mirrors.size()):
 		var cam := mirror_cameras[i]
 		var side := 1.0 if i==0 else -1.0
-		cam.global_position=vehicle.to_global(Vector3(side*1.05,1.25,0.4))
-		cam.look_at(cam.global_position-vehicle.global_basis.z*15+vehicle.global_basis.x*side*3,vehicle.global_basis.y)
+		cam.global_position=vehicle.to_global(Vector3(side*1.05,1.25,0.4) if i<2 else Vector3(0,1.45,-2.3))
+		cam.look_at(cam.global_position-vehicle.global_basis.z*15+vehicle.global_basis.x*(side*3 if i<2 else 0.0),vehicle.global_basis.y)
 		mirrors[i].render_target_update_mode=SubViewport.UPDATE_ONCE if visible and mirror_elapsed>=(0.1 if low_quality else 1.0/30) else SubViewport.UPDATE_DISABLED
 	if mirror_elapsed>=(0.1 if low_quality else 1.0/30): mirror_elapsed=0
 	if not visible and owner_finger!=-1: cancel()
