@@ -2,15 +2,13 @@ extends "res://scripts/main.gd"
 ## Alternate entry scene: all original cockpit, drivetrain and touch UI remain.
 var akurana_world: Node3D
 
+func _world_script() -> Script:
+	return preload("res://scripts/akurana_world.gd")
+
 func _ready() -> void:
 	super._ready()
-	var legacy_world := get_child(0)
-	legacy_world.queue_free()
-	akurana_world = Node3D.new()
+	akurana_world = get_child(0) as Node3D
 	akurana_world.name = "AkuranaWorld"
-	akurana_world.set_script(preload("res://scripts/akurana_world.gd"))
-	add_child(akurana_world)
-	move_child(akurana_world, 0)
 	# The Colombo grid traffic generator does not follow Akurana GIS roads.
 	traffic.set_enabled(false)
 	_spawn_akurana()
