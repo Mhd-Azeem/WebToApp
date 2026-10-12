@@ -83,13 +83,13 @@ func _ready() -> void:
 	G.box(interior,Vector3(0,-0.55,-0.8),Vector3(1.8,0.24,0.6),G.material("",Color(0.045,0.06,0.07)))
 	wheel=MeshInstance3D.new()
 	var ring := TorusMesh.new()
-	ring.inner_radius=0.16
-	ring.outer_radius=0.20
+	ring.inner_radius=0.31
+	ring.outer_radius=0.37
 	ring.rings=16
 	ring.ring_segments=12
 	wheel.mesh=ring
-	wheel.position=Vector3(0,-0.34,-0.64)
-	wheel.rotation.x=PI/2
+	wheel.position=Vector3(0,-0.29,-0.57)
+	wheel.rotation.x=0.0
 	wheel.material_override=G.material("",Color(0.045,0.045,0.05))
 	interior.add_child(wheel)
 	G.box(interior,Vector3(-0.57,-0.4,-0.68),Vector3(0.13,0.23,0.1),G.material("",Color(0.13,0.14,0.15)))
@@ -254,11 +254,13 @@ func _press(id: String, down: bool) -> void:
 
 func _input(event: InputEvent) -> void:
 	if settings.visible: return
+	if event is InputEventKey and event.keycode==KEY_H and not event.pressed: car.horn=0.0
 	if event is InputEventKey and event.pressed and not event.echo:
 		var t = car.transmission
 		if event.keycode==KEY_M: t.toggle(car.signed_speed)
 		elif event.keycode==KEY_C or event.keycode==KEY_V: camera_mode=(camera_mode+1)%3
 		elif event.keycode==KEY_E: t.start_stop()
+		elif event.keycode==KEY_H: car.horn=1.0
 		elif event.keycode==KEY_SPACE: car.handbrake=1-car.handbrake
 		elif event.keycode==KEY_ESCAPE: settings.visible=not settings.visible
 		elif event.keycode==KEY_P: t.select("P",car.signed_speed,float(Input.is_key_pressed(KEY_S)))
@@ -394,7 +396,7 @@ func _build_cockpit_equipment() -> void:
 	for side in [-1.0,1.0]:
 		var lamp := SpotLight3D.new()
 		lamp.position=Vector3(side*0.64,0.62,1.75)
-		lamp.rotation_degrees.x=-7.0
+		lamp.rotation_degrees=Vector3(7.0,180.0,0.0)
 		lamp.spot_range=42.0
 		lamp.spot_angle=35.0
 		lamp.light_energy=2.0
