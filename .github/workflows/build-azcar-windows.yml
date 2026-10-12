@@ -53,14 +53,36 @@ jobs:
           if (-not (Test-Path az-car-3d/build/windows/AZCar3D.exe)) { throw 'EXE missing' }
           $files = Get-ChildItem az-car-3d/build/windows -File
           if ($files.Count -eq 0) { throw 'No output files' }
+      - name: Start the exported game
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exePath = (Resolve-Path az-car-3d/build/windows/AZCar3D.exe).Path
+          $logPath = Join-Path (Split-Path $exePath) 'runtime-smoke.log'
+          $process = Start-Process -FilePath $exePath -ArgumentList @('--headless','--quit-after','120','--log-file',$logPath) -WindowStyle Hidden -PassThru
+          if (-not $process.WaitForExit(120000)) { $process.Kill(); throw 'Exported game timed out' }
+          if ($process.ExitCode -ne 0) { throw 'Exported game failed to start' }
+          if (-not (Test-Path $logPath)) { throw 'Runtime log missing' }
+          if (Select-String -Path $logPath -Pattern 'SCRIPT ERROR|ERROR:') { Get-Content $logPath; throw 'Exported game runtime errors' }
+          Remove-Item -LiteralPath $logPath
       - name: Package portable Windows game
         shell: pwsh
         run: |
           Compress-Archive -Path az-car-3d/build/windows/* -DestinationPath AZCar3D-Windows-x64.zip -Force
           if ((Get-Item AZCar3D-Windows-x64.zip).Length -lt 1024) { throw 'ZIP unexpectedly small' }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path AZCar3D-Windows-x64.zip))
+          try {
+            foreach ($required in @('AZCar3D.exe','AZCar3D.pck')) {
+              $entry = $archive.GetEntry($required)
+              if (-not $entry -or $entry.Length -eq 0) { throw "Missing or empty $required" }
+              $stream = $entry.Open()
+              try { $stream.CopyTo([System.IO.Stream]::Null) } finally { $stream.Dispose() }
+            }
+          } finally { $archive.Dispose() }
       - uses: actions/upload-artifact@v4
         with:
-          name: AZCar3D-Windows-x64
+          name: AZCar3D-Windows-x64-${{ github.sha }}
           path: AZCar3D-Windows-x64.zip
           if-no-files-found: error
 
@@ -73,7 +95,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: AZCar3D-Windows-x64
+          name: AZCar3D-Windows-x64-${{ github.sha }}
           path: release-assets
       - name: Verify packaged build
         run: |

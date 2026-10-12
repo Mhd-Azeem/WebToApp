@@ -102,6 +102,8 @@ func _hud() -> void:
 	settings.traffic_changed.connect(func(value: bool): traffic.set_enabled(value))
 	settings.quality_changed.connect(_apply_quality)
 	settings.visibility_changed.connect(_settings_visibility)
+	settings.throttle_travel_changed.connect(func(value: float):
+		if pedals.has("gas"): pedals.gas.travel=value)
 	settings.transmission_changed.connect(func(mode: int):
 		if mode!=car.transmission.mode and car.transmission.toggle(car.signed_speed):
 			settings._save("automatic",mode==1)
@@ -197,6 +199,7 @@ func _analog(parent: Node,pos: Vector2,size: Vector2,id: String) -> void:
 	pedal.set_script(preload("res://scripts/ui/analog_pedal.gd"))
 	pedal.kind=id
 	pedal.extent=size
+	if id=="gas": pedal.travel=settings.throttle_travel
 	pedal.position=pos
 	parent.add_child(pedal)
 	pedal.changed.connect(func(value: float): _pedal(id,value))
@@ -335,7 +338,6 @@ func _notification(what: int) -> void:
 
 func _desktop_controls(layer: CanvasLayer) -> void:
 	var bar := HBoxContainer.new()
-	bar.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	bar.position=Vector2(865,14)
 	layer.add_child(bar)
 	var transmission_button := Button.new()

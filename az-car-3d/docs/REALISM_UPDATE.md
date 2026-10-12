@@ -17,8 +17,8 @@ Only az-car-3d and its two platform workflows are changed.
 - Original sedan/hatchback/SUV/van/bus body profiles, shared merged material surfaces, following distance and slowing/traffic-phase decisions at route corners.
 - Urban lane divisions, bus shelters, parking lines and traffic signal artwork supplement the existing Colombo network.
 - Dedicated filtered/compressed vehicle audio bus preserves RPM/load layering and lifecycle sounds.
-- Desktop high quality defaults to shadows off; shadows are optional due to their large cost in this existing map.
-- Independent Godot 4.5.1 Android and Windows CI validation/builds, exact filenames, signature/archive checks and source-linked separate versioned prereleases. Existing Android debug signing cache is retained.
+- Saved adjustable accelerator drag distance, render scale (75% / 100%), Windows resolution presets and optional shadows. Desktop high quality defaults to shadows off due to their large cost in this existing map.
+- Independent Godot 4.5.1 Android and Windows CI validation/builds, exact filenames, signature/archive checks, packaged Windows startup and source-linked separate versioned prereleases. Existing Android debug signing cache is retained.
 
 ## Verification
 Local Godot 4.5.1 import passed. Full drivetrain/vehicle suite passed after traffic body and audio bus additions: powered driving, braking/coasting, hills, fifth gear >200 km/h, road/collision, steering, traffic and reverse-camera checks.
