@@ -32,3 +32,7 @@ No external vegetation, terrain or car models were downloaded or redistributed.
 The v0.6 generated PCM audio waveforms are original procedural works, dedicated
 to the public domain under CC0 1.0 Universal. No external recordings are used.
 https://creativecommons.org/publicdomain/zero/1.0/
+
+The v0.7 cockpit assembly, dashboard dials, traffic body profiles, bus shelters,
+parking and traffic-signal geometry are original project artwork. The supplied
+cockpit image was used for visual direction only and is not redistributed.

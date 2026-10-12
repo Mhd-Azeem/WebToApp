@@ -19,6 +19,10 @@ var clutch_pedal := 0.0
 var signed_speed := 0.0
 var wheels: Array[VehicleWheel3D] = []
 var visual: Node3D
+var fuel_litres := 45.0
+var turn_signal := 0
+var hazards := false
+var high_beams := false
 
 func _ready() -> void:
 	if vehicle_configuration!=null:
@@ -68,6 +72,9 @@ func _physics_process(delta: float) -> void:
 		t=0
 		b=1
 	effective_gas=t
+	if transmission.running:
+		fuel_litres=maxf(0,fuel_litres-delta*(0.00022+t*0.0022))
+		if fuel_litres==0: transmission.start_stop()
 	effective_brake=b
 	var c := maxf(clutch_pedal,float((Input.is_key_pressed(KEY_SHIFT) if OS.has_feature("pc") else Input.is_key_pressed(KEY_C))))
 	if not controls_enabled: c=1

@@ -23,10 +23,10 @@ func begin(point: Vector2,index: int) -> bool:
 	if finger!=-1 or not enabled or not visible or not Rect2(Vector2.ZERO,extent).has_point(point): return false
 	finger=index
 	start_y=point.y
-	_set_value(1)
+	_set_value(0.25 if kind=="gas" else 1.0)
 	return true
 func drag_to(point: Vector2) -> void:
-	_set_value(1-(point.y-start_y)/travel)
+	_set_value(clampf(0.25+(start_y-point.y)/maxf(travel,1.0)*0.75,0.25,1.0) if kind=="gas" else 1-(point.y-start_y)/maxf(travel,1.0))
 func cancel() -> void:
 	finger=-1
 	_set_value(0)
@@ -46,6 +46,8 @@ func _input(event: InputEvent) -> void:
 		if event.pressed: begin(inverse*event.position,-2)
 		elif finger==-2: cancel()
 	elif event is InputEventMouseMotion and finger==-2: drag_to(inverse*event.position)
+func _notification(what: int) -> void:
+	if what in [NOTIFICATION_APPLICATION_FOCUS_OUT,NOTIFICATION_APPLICATION_PAUSED] and is_instance_valid(symbol): cancel()
 func _draw() -> void:
 	if finger==-1: return
 	draw_arc(extent*0.5,extent.x*0.46,-PI/2,-PI/2+TAU*value,32,Color(0.30,0.9,0.6),4,true)
