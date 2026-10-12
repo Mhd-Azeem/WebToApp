@@ -14,6 +14,8 @@ jobs:
     if: github.ref == 'refs/heads/feature/az-car-3d'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -37,6 +39,11 @@ jobs:
           unzip -q /tmp/templates.tpz 'templates/android_debug.apk' 'templates/android_release.apk' -d /tmp
           mkdir -p ~/.local/share/godot/export_templates/4.5.1.stable
           cp /tmp/templates/*.apk ~/.local/share/godot/export_templates/4.5.1.stable/
+      - name: Restore persistent preview signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: az-car-3d-colombo-preview-signing-v1
       - name: Configure exporter and debug signing
         run: |
           set -euo pipefail
@@ -74,3 +81,40 @@ jobs:
           name: AZ-Car-3D-Colombo-debug
           path: az-car-3d/build/
           if-no-files-found: error
+      - name: Publish verified APK to rolling game release
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+          RELEASE_TAG: az-car-3d-latest
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          cd az-car-3d/build
+          test -s AZ-Car-3D-Colombo-debug.apk
+          sha256sum AZ-Car-3D-Colombo-debug.apk > SHA256SUMS.txt
+          cat > release-notes.md <<'EOF'
+          Latest verified AZ Car 3D Android preview. This release is refreshed automatically after every successful game build on feature/az-car-3d. Failed builds leave the previous APK available.
+
+          Download AZ-Car-3D-Colombo-debug.apk below. Android arm64, Android 7.0+; debug-signed preview.
+
+          Includes connected long Colombo-inspired roads and collision, procedural engine/start/shift/horn/brake/tire audio, analog speed and RPM gauges with gear readout in hood view, chase and cockpit cameras, manual/automatic transmission and native multitouch controls.
+
+          Camera button / V cycles chase, cockpit and hood. Speaker button / H holds the horn. Hold clutch to shift manually; stop and hold brake to select automatic D. Start with LOW quality.
+
+          Godot validation, transmission/multitouch/road collision tests, Android export and APK signature verification must pass before publication. Device performance and audio quality still require physical Android testing. SHA256SUMS.txt contains the APK checksum.
+
+          WebToApp and previous versioned game releases remain available separately.
+          EOF
+          printf '\nSource commit: [%s](https://github.com/%s/commit/%s)\n\nVerified build: %s\n' "$SOURCE_SHA" "$GH_REPO" "$SOURCE_SHA" "$RUN_URL" >> release-notes.md
+          # Detect existing releases without hiding authentication/network failures.
+          gh api "repos/$GH_REPO/releases" --paginate --jq '.[].tag_name' > release-tags.txt
+          if grep -Fxq "$RELEASE_TAG" release-tags.txt; then
+            # This intentionally moves only the rolling game tag; version tags stay fixed.
+            gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$RELEASE_TAG" -f sha="$SOURCE_SHA" -F force=true
+            gh release upload "$RELEASE_TAG" AZ-Car-3D-Colombo-debug.apk SHA256SUMS.txt --clobber
+            gh release edit "$RELEASE_TAG" --title 'AZ Car 3D — Latest APK' --notes-file release-notes.md --prerelease --latest=false
+          else
+            gh release create "$RELEASE_TAG" --target "$SOURCE_SHA" --prerelease --latest=false --title 'AZ Car 3D — Latest APK' --notes-file release-notes.md AZ-Car-3D-Colombo-debug.apk SHA256SUMS.txt
+          fi
