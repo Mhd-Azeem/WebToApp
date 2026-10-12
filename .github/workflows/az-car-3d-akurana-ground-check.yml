@@ -1,0 +1,33 @@
+name: Akurana Ground Physics Preflight
+on:
+  push:
+    branches: [fix/az-car-3d-akurana-ground]
+    paths: ['az-car-3d/**', '.github/workflows/az-car-3d-akurana-ground-check.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ground-contact:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Godot 4.5.1
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 https://github.com/godotengine/godot-builds/releases/download/4.5.1-stable/Godot_v4.5.1-stable_linux.x86_64.zip -o /tmp/godot.zip
+          unzip -q /tmp/godot.zip -d /tmp
+          sudo install /tmp/Godot_v4.5.1-stable_linux.x86_64 /usr/local/bin/godot
+      - name: Import project
+        run: godot --headless --path az-car-3d --editor --import --quit
+      - name: Physics wheel and terrain contact validation
+        run: |
+          set -o pipefail
+          godot --headless --path az-car-3d --script res://tests/akurana_ground_physics.gd 2>&1 | tee ground-physics.log
+          if grep -E 'SCRIPT ERROR|ERROR:' ground-physics.log; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: akurana-physics-check-${{ github.sha }}
+          path: ground-physics.log
+          if-no-files-found: ignore
