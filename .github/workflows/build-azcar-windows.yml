@@ -1,0 +1,56 @@
+name: AZ Car 3D Windows x64
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/az-car-3d]
+    paths:
+      - 'az-car-3d/**'
+      - '.github/workflows/build-azcar-windows.yml'
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install matching Godot 4.5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '4.5-stable'
+          $base = "https://github.com/godotengine/godot-builds/releases/download/$version"
+          Invoke-WebRequest "$base/Godot_v4.5-stable_win64_console.exe.zip" -OutFile godot.zip
+          Expand-Archive godot.zip -DestinationPath godot
+          Invoke-WebRequest "$base/Godot_v4.5-stable_export_templates.tpz" -OutFile templates.tpz
+          Copy-Item templates.tpz templates.zip
+          Expand-Archive templates.zip -DestinationPath templates
+          $dest = Join-Path $env:APPDATA 'Godot/export_templates/4.5.stable'
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Copy-Item templates/templates/* $dest -Recurse -Force
+          $exe = Get-ChildItem godot -Filter '*console.exe' -Recurse | Select-Object -First 1
+          if (-not $exe) { throw 'Godot console executable missing' }
+          "GODOT_EXE=$($exe.FullName)" | Out-File -Append $env:GITHUB_ENV -Encoding utf8
+      - name: Import and validate Godot project
+        shell: pwsh
+        run: |
+          & $env:GODOT_EXE --headless --path az-car-3d --editor --import --quit
+          if ($LASTEXITCODE -ne 0) { throw 'Godot import failed' }
+      - name: Export Windows release
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force az-car-3d/build/windows | Out-Null
+          & $env:GODOT_EXE --headless --path az-car-3d --export-release 'Windows Desktop' build/windows/AZCar3D.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Windows export failed' }
+          if (-not (Test-Path az-car-3d/build/windows/AZCar3D.exe)) { throw 'EXE missing' }
+          $files = Get-ChildItem az-car-3d/build/windows -File
+          if ($files.Count -eq 0) { throw 'No output files' }
+      - name: Package portable Windows game
+        shell: pwsh
+        run: |
+          Compress-Archive -Path az-car-3d/build/windows/* -DestinationPath AZCar3D-Windows-x64.zip -Force
+          if ((Get-Item AZCar3D-Windows-x64.zip).Length -lt 1024) { throw 'ZIP unexpectedly small' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AZCar3D-Windows-x64
+          path: AZCar3D-Windows-x64.zip
+          if-no-files-found: error
