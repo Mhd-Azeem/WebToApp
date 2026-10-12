@@ -76,9 +76,9 @@ jobs:
           set -euo pipefail
           godot --headless --path az-car-3d --export-debug Android build/AZ-Car-3D-Akurana.apk 2>&1 | tee az-car-3d/build/export.log
           if grep -E 'SCRIPT ERROR|ERROR:' az-car-3d/build/export.log; then exit 1; fi
-          test -s az-car-3d/build/AZ-Car-3D-Colombo.apk
-          "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose az-car-3d/build/AZ-Car-3D-Colombo.apk
-          "$ANDROID_HOME/build-tools/35.0.1/aapt" dump badging az-car-3d/build/AZ-Car-3D-Colombo.apk | tee az-car-3d/build/apk-badging.txt
+          test -s az-car-3d/build/AZ-Car-3D-Akurana.apk
+          "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose az-car-3d/build/AZ-Car-3D-Akurana.apk
+          "$ANDROID_HOME/build-tools/35.0.1/aapt" dump badging az-car-3d/build/AZ-Car-3D-Akurana.apk | tee az-car-3d/build/apk-badging.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
