@@ -71,6 +71,11 @@ jobs:
         run: godot --headless --path az-car-3d --script res://tests/cockpit_checks.gd
       - name: Akurana geographic scene smoke checks
         run: godot --headless --path az-car-3d --script res://tests/akurana_smoke.gd
+      - name: Prove car stays on physical Akurana terrain under gravity
+        run: |
+          set -euo pipefail
+          godot --headless --path az-car-3d --script res://tests/akurana_ground_physics.gd 2>&1 | tee az-car-3d/build/ground-physics.log
+          if grep -E 'SCRIPT ERROR|ERROR:' az-car-3d/build/ground-physics.log; then exit 1; fi
       - name: Export debug Android APK
         run: |
           set -euo pipefail
