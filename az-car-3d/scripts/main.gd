@@ -20,6 +20,10 @@ func _ready() -> void:
 	car.set_script(preload("res://scripts/car.gd"))
 	add_child(car)
 	car.reset()
+	var engine_audio := Node.new()
+	engine_audio.set_script(preload("res://scripts/engine_audio.gd"))
+	engine_audio.car=car
+	add_child(engine_audio)
 	sun=DirectionalLight3D.new()
 	sun.rotation_degrees=Vector3(-42,-28,0)
 	sun.light_color=Color(1.0,0.92,0.79)
