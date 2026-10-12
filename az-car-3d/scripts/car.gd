@@ -23,6 +23,8 @@ var fuel_litres := 45.0
 var turn_signal := 0
 var hazards := false
 var high_beams := false
+# Override for georeferenced map scenes; legacy Colombo defaults stay unchanged.
+var spawn_point := Vector3(-3.5, 1.0, 120.0)
 
 func _ready() -> void:
 	if vehicle_configuration!=null:
@@ -93,7 +95,7 @@ func _physics_process(delta: float) -> void:
 func reset() -> void:
 	linear_velocity=Vector3.ZERO
 	angular_velocity=Vector3.ZERO
-	position=Vector3(-3.5,1.0,120)
+	position=spawn_point
 	rotation=Vector3(0,PI,0)
 	transmission.reset()
 	handbrake=0
