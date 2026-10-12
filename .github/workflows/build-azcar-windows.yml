@@ -85,15 +85,3 @@ jobs:
             --notes "Portable Windows x64 build from feature/az-car-3d. Extract ZIP and launch AZCar3D.exe. This is an early Windows build; gameplay validation on actual hardware remains necessary." \
             --prerelease
 
-      - name: Publish independent Windows release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          tag="azcar-windows-v0.1.0-build.${{ github.run_number }}"
-          gh release create "$tag" release-assets/AZCar3D-Windows-x64.zip \
-            --target "${{ github.sha }}" \
-            --title "AZ Car 3D Windows v0.1.0 (Build ${{ github.run_number }})" \
-            --notes "Portable Windows x64 build from feature/az-car-3d. Extract ZIP and launch AZCar3D.exe. This is an early Windows build; gameplay validation on actual hardware remains necessary." \
-            --prerelease
