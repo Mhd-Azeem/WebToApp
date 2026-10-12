@@ -19,7 +19,7 @@ func _spawn_akurana() -> void:
 	if not is_instance_valid(car) or not is_instance_valid(akurana_world):
 		return
 	car.reset()
-	car.position = Vector3(-113.0, akurana_world.height_at(-113.0, 25.0) + 1.6, 25.0)
+	car.position = Vector3(-113.0, float(akurana_world.call("height_at", -113.0, 25.0)) + 1.6, 25.0)
 	car.rotation = Vector3.ZERO
 	car.sleeping = false
 
