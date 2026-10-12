@@ -49,6 +49,11 @@ jobs:
         run: |
           & $env:GODOT_EXE --headless --path az-car-3d --script res://tests/akurana_smoke.gd
           if ($LASTEXITCODE -ne 0) { throw 'Akurana smoke checks failed' }
+      - name: Akurana vehicle-ground physics regression
+        shell: pwsh
+        run: |
+          & $env:GODOT_EXE --headless --path az-car-3d --script res://tests/akurana_ground_physics.gd 2>&1 | Tee-Object ground-physics.log
+          if ($LASTEXITCODE -ne 0 -or (Select-String -Path ground-physics.log -Pattern 'SCRIPT ERROR|ERROR:')) { throw 'Akurana car must remain on map terrain' }
       - name: Export Windows release
         shell: pwsh
         run: |
