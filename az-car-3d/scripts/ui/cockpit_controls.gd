@@ -14,7 +14,7 @@ var wheel_center := Vector2.ZERO
 var steering := 0.0
 
 func _ready() -> void:
-	mouse_filter=Control.MOUSE_FILTER_STOP
+	mouse_filter=Control.MOUSE_FILTER_IGNORE
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	queue_redraw()
 
@@ -43,23 +43,23 @@ func _draw_stalk(rect: Rect2,title: String,active: bool) -> void:
 	draw_circle(knob,13,Color(0.20,0.83,0.48) if active else Color(0.86,0.38,0.28))
 	draw_string(ThemeDB.fallback_font,rect.position+Vector2(8,122),"ON" if active else "OFF",HORIZONTAL_ALIGNMENT_LEFT,-1,12,Color.WHITE)
 
-func _gui_input(event: InputEvent) -> void:
+func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index==MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			_begin(event.position)
 		else:
 			_end()
-		accept_event()
+		if dragging!="": get_viewport().set_input_as_handled()
 	elif event is InputEventMouseMotion and dragging!="":
 		_drag(event.position)
-		accept_event()
+		if dragging!="": get_viewport().set_input_as_handled()
 	elif event is InputEventScreenTouch:
 		if event.pressed: _begin(event.position)
 		else: _end()
-		accept_event()
+		if dragging!="": get_viewport().set_input_as_handled()
 	elif event is InputEventScreenDrag and dragging!="":
 		_drag(event.position)
-		accept_event()
+		if dragging!="": get_viewport().set_input_as_handled()
 
 func _begin(pos: Vector2) -> void:
 	if left_rect.has_point(pos): dragging="lights"; _drag(pos)
@@ -87,4 +87,3 @@ func _end() -> void:
 		horn_held=false
 		horn_changed.emit(false)
 	dragging=""
-	mouse_filter=Control.MOUSE_FILTER_STOP
