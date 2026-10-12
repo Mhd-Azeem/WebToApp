@@ -126,4 +126,42 @@ func world_test() -> void:
 	for i in range(240): await physics_frame
 	check(scene.car.position.z>109,"Physical barrier blocks vehicle")
 	print("Scene / vehicle checks: ","PASS" if failures==0 else "FAIL")
+	# Surfaces and clear passage at every former boundary, seam and outer loop.
+	var space: PhysicsDirectSpaceState3D = scene.get_world_3d().direct_space_state
+	for x in [-96.0,0.0,96.0,160.0]:
+		for z in [-960.0,-640.0,-320.0,-188.0,-180.0,-160.0,160.0,180.0,188.0,320.0,640.0,960.0]:
+			var ray := PhysicsRayQueryParameters3D.create(Vector3(x,3,z),Vector3(x,-1,z))
+			ray.exclude=[scene.car.get_rid()]
+			var hit: Dictionary = space.intersect_ray(ray)
+			check(not hit.is_empty() and hit.position.y<0.3,"Continuous road surface at %s / %s" % [x,z])
+		for side in [-1.0,1.0]:
+			var ray := PhysicsRayQueryParameters3D.create(Vector3(x,0.7,side*170),Vector3(x,0.7,side*220))
+			ray.exclude=[scene.car.get_rid()]
+			check(space.intersect_ray(ray).is_empty(),"City exit has no blocking wall")
+	for z in [-960.0,-640.0,-320.0,320.0,640.0,960.0]:
+		for x in [-96.0,-48.0,0.0,48.0,96.0]:
+			var ray := PhysicsRayQueryParameters3D.create(Vector3(x,3,z),Vector3(x,-1,z))
+			check(not space.intersect_ray(ray).is_empty(),"Cross-road loop collision")
+	scene._press("camera",true)
+	check(scene.camera_mode==1,"Cockpit retained in camera cycle")
+	scene._press("camera",true)
+	await process_frame
+	await process_frame
+	check(scene.camera_mode==2 and scene.gauges.visible and scene.car.visual.visible,"Hood camera has gauges and visible hood")
+	scene._press("horn",true)
+	check(scene.car.horn==1,"Touch horn pressed")
+	scene._press("horn",false)
+	check(scene.car.horn==0,"Touch horn released")
+	print("Road connectivity / hood / horn checks: ","PASS" if failures==0 else "FAIL")
+	scene.car.reset()
+	scene.car.position=Vector3(-3.5,1,-165)
+	for i in range(120): await physics_frame
+	scene.car.transmission.mode=T.Mode.AUTOMATIC
+	scene.car.transmission.select("D",0,1)
+	scene.car.gas=1
+	for i in range(600): await physics_frame
+	check(scene.car.position.z < -250 and scene.car.position.y > -1,"Powered car crosses city boundary onto extended road")
+	print("Extended-road powered drive: ",scene.car.position)
+	scene.queue_free()
+	await process_frame
 	quit(1 if failures else 0)

@@ -16,19 +16,21 @@ func _ready() -> void:
 	for x in STREET_X:
 		G.box(self,Vector3(x,-0.07,0),Vector3(15,0.12,360),asphalt,true)
 		for side in [-1,1]:
-			G.box(self,Vector3(x+side*9,0.07,0),Vector3(3,0.25,360),pavement,true)
+			for z0 in [-180.0,-160.0,-80.0,0.0,80.0,160.0]:
+				var z1 := minf(z0+80.0,180.0) if z0>=-160 else -160.0
+				if z1-z0>24: G.box(self,Vector3(x+side*9,0.07,(z0+z1)/2),Vector3(3,0.25,z1-z0-24),pavement,true)
 		for z in range(-175,176,8):
 			if _junction(float(z)): continue
 			G.box(self,Vector3(x,0.005,z),Vector3(0.12,0.015,3),white)
 	for z in STREET_Z:
 		G.box(self,Vector3(0,-0.05,z),Vector3(340,0.12,15),asphalt,true)
 		for side in [-1,1]:
-			G.box(self,Vector3(0,0.06,z+side*9),Vector3(340,0.24,3),pavement,true)
+			for span in [Vector2(-170,-108),Vector2(-84,-12),Vector2(12,84),Vector2(108,148)]:
+				G.box(self,Vector3((span.x+span.y)/2,0.06,z+side*9),Vector3(span.y-span.x,0.24,3),pavement,true)
 		for x in range(-108,109,8):
 			if abs(x)<12 or abs(abs(x)-96)<12: continue
 			G.box(self,Vector3(x,0.015,z),Vector3(3,0.01,0.12),white)
-	# Remove raised pavement at crossings by segmenting above sidewalks visually;
-	# ramps bridge 12cm curbs at each drivable intersection.
+	# Short raised crossing pads meet sidewalks that stop before each junction.
 	for x in STREET_X:
 		for z in STREET_Z:
 			G.box(self,Vector3(x,0.06,z),Vector3(21,0.12,21),asphalt,true)
@@ -56,7 +58,9 @@ func _ready() -> void:
 Future hill-country district",Vector3(7,5,-181),25)
 	G.label(self,"← GALLE COAST
 Future coastal district",Vector3(96,5,181),25).rotation.y=PI
-	for z in [-188.0,188.0]: G.box(self,Vector3(0,0.8,z),Vector3(370,1.6,2),G.material("concrete"),true)
+	for z in [-188.0,188.0]:
+		for span in [Vector2(-140,-108),Vector2(-84,-12),Vector2(12,84),Vector2(108,148),Vector2(172,180)]:
+			G.box(self,Vector3((span.x+span.y)/2,0.8,z),Vector3(span.y-span.x,1.6,2),ground,true)
 	for x in [-140.0,180.0]: G.box(self,Vector3(x,0.8,0),Vector3(2,1.6,380),ground,true)
 	# Hybrid fringe: rural plots / tea-country hills and a Galle-inspired arcade.
 	G.box(self,Vector3(160,0.01,0),Vector3(13,0.12,340),asphalt,true)
@@ -68,7 +72,7 @@ Future coastal district",Vector3(96,5,181),25).rotation.y=PI
 	G.label(self,"RURAL LANKA • PADDY LANE",Vector3(156,4,105),28)
 	_building(Vector3(129,0,-15),1,0)
 	G.label(self,"GALLE-INSPIRED COLONIAL ARCADE",Vector3(42,5,32),22)
-	for x in [-35.0,30.0,95.0]:
+	for x in [-220.0,260.0,380.0]:
 		var hill := MeshInstance3D.new()
 		var sphere := SphereMesh.new()
 		sphere.radius=55
@@ -82,6 +86,7 @@ Future coastal district",Vector3(96,5,181),25).rotation.y=PI
 	var extension := Node3D.new()
 	extension.set_script(preload("res://scripts/road_extension.gd"))
 	add_child(extension)
+	_batch_geometry(extension)
 	landmark_count = 4
 	_batch_geometry()
 
@@ -117,12 +122,13 @@ func _palm(pos: Vector3) -> void:
 		var leaf := G.box(self,pos+Vector3(0,6,0),Vector3(0.65,0.12,5),G.material("",Color(0.18,0.37,0.13)))
 		leaf.rotation=Vector3(0.2,i*TAU/6,0)
 
-func _batch_geometry() -> void:
+func _batch_geometry(source: Node3D = null) -> void:
 	# Batch repeated static meshes by dimensions and material, keeping physical bodies.
+	if source==null: source=self
 	var groups := {}
-	for child in get_children():
+	for child in source.get_children():
 		if not child is MeshInstance3D or not child.mesh is BoxMesh: continue
-		var key := str(child.mesh.size) + ":" + str(child.material_override.get_instance_id())
+		var key := str(child.mesh.size) + ":" + str(child.material_override.get_instance_id()) + ":" + str(floori(child.position.x/160)) + ":" + str(floori(child.position.z/160))
 		if not groups.has(key): groups[key]=[]
 		groups[key].append(child)
 	for key in groups:
@@ -136,11 +142,12 @@ func _batch_geometry() -> void:
 		batch.multimesh=mm
 		batch.material_override=nodes[0].material_override
 		batch.visibility_range_end=260
-		add_child(batch)
+		source.add_child(batch)
 		for i in range(nodes.size()):
 			var n: MeshInstance3D=nodes[i]
 			mm.set_instance_transform(i,n.transform)
 			for body in n.get_children():
 				if body is StaticBody3D:
-					body.reparent(self,true)
+					body.reparent(source,true)
 			n.queue_free()
+

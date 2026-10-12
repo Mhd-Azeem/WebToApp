@@ -7,8 +7,12 @@ func capture() -> void:
 	for i in range(120): await process_frame
 	await RenderingServer.frame_post_draw
 	root.get_texture().get_image().save_png("res://build/chase.png")
-	scene.cockpit=true
+	scene.camera_mode=1
 	for i in range(5): await process_frame
 	await RenderingServer.frame_post_draw
 	root.get_texture().get_image().save_png("res://build/cockpit.png")
+	scene.camera_mode=2
+	for i in range(5): await process_frame
+	await RenderingServer.frame_post_draw
+	root.get_texture().get_image().save_png("res://build/hood.png")
 	quit()

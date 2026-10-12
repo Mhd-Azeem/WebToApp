@@ -8,6 +8,7 @@ var selector := "P"
 var clutch := 0.0
 var rpm := 850.0
 var running := true
+var ignition_serial := 0
 var auto_gear := 1
 var message := "Hold clutch, select 1, release clutch gently and accelerate"
 const RATIOS := [0.0, 3.55, 2.05, 1.36, 1.03, 0.82]
@@ -79,3 +80,4 @@ func update(delta: float, speed: float, gas: float) -> float:
 func display() -> String:
 	if mode == Mode.AUTOMATIC: return "AT " + selector + (" / " + str(auto_gear) if selector == "D" else "")
 	return "MT " + ("R" if gear == -1 else ("N" if gear == 0 else str(gear)))
+

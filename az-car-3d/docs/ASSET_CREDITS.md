@@ -20,3 +20,7 @@ The v0.3 control symbols and H-pattern panel are original Godot vector drawings.
 The user's VectorStock reference image is not included in the application.
 The revised sport coupe is original unbranded mesh geometry, with no copied
 manufacturer logos or third-party car models.
+
+Engine, starter, horn, shift, rev-drop, brake and tire sounds are original
+procedural synthesis in scripts/engine_audio.gd. No audio recordings or external
+audio assets are redistributed. Hood dials are original Godot vector drawings.

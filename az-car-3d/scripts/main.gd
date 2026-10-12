@@ -4,6 +4,8 @@ var car: VehicleBody3D
 var camera: Camera3D
 var hud: Label
 var cockpit := false
+var camera_mode := 0
+var gauges: Node2D
 var low_quality := true
 var touch_buttons: Array[TouchScreenButton] = []
 var sun: DirectionalLight3D
@@ -79,6 +81,11 @@ func _hud() -> void:
 	backing.color=Color(0.035,0.07,0.09,0.80)
 	backing.mouse_filter=Control.MOUSE_FILTER_IGNORE
 	layer.add_child(backing)
+	gauges=Node2D.new()
+	gauges.set_script(preload("res://scripts/ui/hood_gauges.gd"))
+	gauges.vehicle=car
+	gauges.position=Vector2(640,580)
+	layer.add_child(gauges)
 	hud=Label.new()
 	hud.position=Vector2(22,15)
 	hud.size=Vector2(630,57)
@@ -101,6 +108,7 @@ func _hud() -> void:
 		_touch(layer,Vector2(1190,16+i*66),Vector2(60,60),["mode","camera","reset","start"][i])
 	_touch(layer,Vector2(24,100),Vector2(58,58),"quality")
 	_touch(layer,Vector2(94,100),Vector2(58,58),"regions")
+	_touch(layer,Vector2(164,100),Vector2(58,58),"horn")
 
 func _touch(parent: Node, pos: Vector2, size: Vector2, id: String) -> void:
 	var button := TouchScreenButton.new()
@@ -142,6 +150,7 @@ func _touch(parent: Node, pos: Vector2, size: Vector2, id: String) -> void:
 
 func _press(id: String, down: bool) -> void:
 	held[id]=down
+	car.horn=float(held.get("horn",false))
 	car.gas=float(held.get("gas",false))
 	car.pedal_brake=float(held.get("brake",false))
 	car.clutch_pedal=float(held.get("clutch",false))
@@ -152,7 +161,7 @@ func _press(id: String, down: bool) -> void:
 	elif id=="mode": car.transmission.toggle(car.signed_speed)
 	elif id=="start": car.transmission.restart()
 	elif id=="reset": car.reset()
-	elif id=="camera": cockpit=not cockpit
+	elif id=="camera": camera_mode=(camera_mode+1)%3
 	elif id=="quality":
 		low_quality=not low_quality
 		sun.shadow_enabled=not low_quality
@@ -163,7 +172,7 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		var t = car.transmission
 		if event.keycode==KEY_M: t.toggle(car.signed_speed)
-		elif event.keycode==KEY_V: cockpit=not cockpit
+		elif event.keycode==KEY_V: camera_mode=(camera_mode+1)%3
 		elif event.keycode==KEY_E: t.restart()
 		elif event.keycode==KEY_P: t.select("P",car.signed_speed,float(Input.is_key_pressed(KEY_S)))
 		elif event.keycode==KEY_R:
@@ -176,12 +185,18 @@ func _input(event: InputEvent) -> void:
 		elif event.keycode>=KEY_1 and event.keycode<=KEY_5: t.shift(event.keycode-KEY_0,car.signed_speed)
 
 func _process(delta: float) -> void:
+	cockpit=camera_mode==1
+	gauges.visible=camera_mode==2
 	interior.visible=cockpit
 	wheel.rotation.z=-car.steering*2.5
 	if cockpit:
 		camera.global_position=car.to_global(Vector3(-0.42,1.58,0.5))
 		camera.look_at(camera.global_position+car.global_basis.z*10,car.global_basis.y)
 		car.visual.visible=false
+	elif camera_mode==2:
+		car.visual.visible=true
+		camera.global_position=car.to_global(Vector3(0,1.32,1.15))
+		camera.look_at(camera.global_position+car.global_basis.z*20,car.global_basis.y)
 	else:
 		car.visual.visible=true
 		var desired := car.to_global(Vector3(0,4.1,-8.5))
@@ -207,3 +222,4 @@ func _notification(what: int) -> void:
 		car.release_controls()
 		get_tree().paused=true
 	elif what==NOTIFICATION_APPLICATION_FOCUS_IN: get_tree().paused=false
+

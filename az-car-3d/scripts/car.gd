@@ -3,6 +3,9 @@ const G = preload("res://scripts/geometry.gd")
 const Transmission = preload("res://scripts/transmission.gd")
 var transmission := Transmission.new()
 var gas := 0.0
+var horn := 0.0
+var effective_gas := 0.0
+var effective_brake := 0.0
 var pedal_brake := 0.0
 var turn := 0.0
 var clutch_pedal := 0.0
@@ -125,6 +128,8 @@ func _physics_process(delta: float) -> void:
 	signed_speed = linear_velocity.dot(global_basis.z)
 	var t := maxf(gas,float(Input.is_key_pressed(KEY_W)))
 	var b := maxf(pedal_brake,float(Input.is_key_pressed(KEY_S)))
+	effective_gas=t
+	effective_brake=b
 	var c := maxf(clutch_pedal,float(Input.is_key_pressed(KEY_C)))
 	transmission.clutch=move_toward(transmission.clutch,c,delta*3.0)
 	var steer_input := turn + float(Input.is_key_pressed(KEY_A))-float(Input.is_key_pressed(KEY_D))
@@ -147,7 +152,9 @@ func reset() -> void:
 	transmission.running=true
 
 func release_controls() -> void:
+	horn=0
 	gas=0
 	pedal_brake=0
 	turn=0
 	clutch_pedal=0
+
