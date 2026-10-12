@@ -79,6 +79,9 @@ Future coastal district",Vector3(96,5,181),25).rotation.y=PI
 		hill.position=Vector3(x,-25,-245)
 		hill.material_override=G.material("",Color(0.29,0.39,0.22))
 		add_child(hill)
+	var extension := Node3D.new()
+	extension.set_script(preload("res://scripts/road_extension.gd"))
+	add_child(extension)
 	landmark_count = 4
 	_batch_geometry()
 
