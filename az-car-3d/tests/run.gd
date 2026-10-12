@@ -46,10 +46,12 @@ func world_test() -> void:
 	await physics_frame
 	check(scene.car.wheels.size()==4,"Four physics wheels")
 	check(scene.car.global_position.x<0,"Car facing -Z starts on driver-left lane (-X)")
+	check(scene.shifter.position.y<560 and scene.shifter.position.x>990,"Shifter fixed above brake")
+	check(not scene.shifter.begin(Vector2.ZERO,4),"H shifter requires clutch")
 	# Native multitouch: three pedals/steering held independently.
-	for pos in [Vector2(1180,600),Vector2(70,600),Vector2(900,600)]:
+	for pos in [Vector2(1170,610),Vector2(70,600),Vector2(127,490)]:
 		var touch := InputEventScreenTouch.new()
-		touch.index=1 if pos.x<200 else (2 if pos.x<1000 else 3)
+		touch.index=2 if pos.y<550 else (1 if pos.x<200 else 3)
 		touch.position=pos
 		touch.pressed=true
 		root.push_input(touch,true)
@@ -62,12 +64,45 @@ func world_test() -> void:
 	root.push_input(release,true)
 	await process_frame
 	check(scene.car.turn==0 and scene.car.gas==1,"Releasing steer keeps gas held")
+	# Keep gas and clutch held while a fourth independent finger moves the lever.
+	for i in range(24): await physics_frame
+	var h = scene.shifter
+	var gear_touch := InputEventScreenTouch.new()
+	gear_touch.index=4
+	gear_touch.pressed=true
+	gear_touch.position=h.position
+	root.push_input(gear_touch,true)
+	check(h.finger==4,"H lever owns its touch independently")
+	var drag := InputEventScreenDrag.new()
+	drag.index=4
+	drag.position=h.position+Vector2(-52,-44)
+	root.push_input(drag,true)
+	check(scene.car.transmission.gear==1,"Dragging left-up engages first")
+	check(scene.car.gas==1 and scene.car.clutch_pedal==1,"Pedals remain held while shifting")
+	# Sideways hopping across occupied vertical slots is impossible.
+	h.drag_to(Vector2(52,-44))
+	check(scene.car.transmission.gear==1 and h.knob.x==-52,"Must leave vertical slot through neutral")
+	for gear in [2,3,4,5,-1]:
+		h.drag_to(Vector2(h.knob.x,0))
+		check(scene.car.transmission.gear==0,"Cross gate disconnects drive")
+		h.drag_to(h.gear_position(gear))
+		check(scene.car.transmission.gear==gear,"Reference H pattern gear "+str(gear))
+	h.drag_to(Vector2(52,0))
+	scene.car.signed_speed=3
+	h.drag_to(Vector2(52,44))
+	check(scene.car.transmission.gear==0,"Moving reverse rejected by draggable lever")
+	scene.car.signed_speed=0
+	gear_touch.pressed=false
+	root.push_input(gear_touch,true)
+	check(h.finger==-1 and h.knob==Vector2.ZERO,"Release snaps to actual neutral")
+	print("H-pattern / multitouch checks: ","PASS" if failures==0 else "FAIL")
 	for index in [2,3]:
 		release=InputEventScreenTouch.new()
 		release.index=index
 		release.pressed=false
 		root.push_input(release,true)
 	scene.car.release_controls()
+	scene.car.reset()
 	scene.held.clear()
 	# Let suspension settle, then accelerate in automatic D.
 	for i in range(180): await physics_frame

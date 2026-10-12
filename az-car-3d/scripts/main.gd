@@ -10,6 +10,7 @@ var sun: DirectionalLight3D
 var held := {}
 var interior: Node3D
 var wheel: MeshInstance3D
+var shifter: Node2D
 
 func _ready() -> void:
 	var world := Node3D.new()
@@ -69,40 +70,38 @@ func _hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	var backing := ColorRect.new()
-	backing.position=Vector2(10,8)
-	backing.size=Vector2(890,157)
-	backing.color=Color(0.035,0.07,0.09,0.85)
+	backing.position=Vector2(12,10)
+	backing.size=Vector2(650,64)
+	backing.color=Color(0.035,0.07,0.09,0.80)
 	backing.mouse_filter=Control.MOUSE_FILTER_IGNORE
 	layer.add_child(backing)
 	hud=Label.new()
-	hud.position=Vector2(22,18)
-	hud.add_theme_font_size_override("font_size",22)
+	hud.position=Vector2(22,15)
+	hud.size=Vector2(630,57)
+	hud.clip_text=true
+	hud.add_theme_font_size_override("font_size",14)
 	layer.add_child(hud)
-	var hint := Label.new()
-	hint.text="COLOMBO DISTRICT  •  Keep left  •  Stop / yield at junctions\nW/S gas/brake • A/D steer • C clutch • 1–5/R/N shift • M mode • V camera"
-	hint.position=Vector2(22,110)
-	layer.add_child(hint)
-	_touch(layer,"LEFT",Vector2(22,550),Vector2(112,112),"left")
-	_touch(layer,"RIGHT",Vector2(150,550),Vector2(112,112),"right")
-	_touch(layer,"CLUTCH",Vector2(850,550),Vector2(112,112),"clutch")
-	_touch(layer,"BRAKE",Vector2(990,550),Vector2(112,112),"brake")
-	_touch(layer,"GAS",Vector2(1130,550),Vector2(112,112),"gas")
-	for i in range(7):
-		var gear_name: String = ["R","N","1","2","3","4","5"][i]
-		_touch(layer,gear_name,Vector2(520+i*74,440),Vector2(66,70),"gear"+str(i-1))
+	_touch(layer,Vector2(24,560),Vector2(96,96),"left")
+	_touch(layer,Vector2(134,560),Vector2(96,96),"right")
+	_touch(layer,Vector2(79,444),Vector2(96,96),"clutch")
+	_touch(layer,Vector2(990,560),Vector2(104,104),"brake")
+	_touch(layer,Vector2(1120,560),Vector2(104,104),"gas")
+	shifter=Node2D.new()
+	shifter.set_script(preload("res://scripts/ui/h_shifter.gd"))
+	shifter.position=Vector2(1042,422)
+	shifter.vehicle=car
+	layer.add_child(shifter)
 	for i in range(4):
-		_touch(layer,["P","R","N","D"][i],Vector2(780+i*84,350),Vector2(76,66),"auto"+["P","R","N","D"][i])
-	_touch(layer,"MT / AT",Vector2(1110,20),Vector2(144,58),"mode")
-	_touch(layer,"CAMERA",Vector2(1110,92),Vector2(144,58),"camera")
-	_touch(layer,"RESET",Vector2(1110,164),Vector2(144,58),"reset")
-	_touch(layer,"START",Vector2(1110,236),Vector2(144,58),"start")
-	_touch(layer,"QUALITY",Vector2(22,190),Vector2(144,58),"quality")
-	_touch(layer,"REGIONS",Vector2(22,262),Vector2(144,58),"regions")
+		_touch(layer,Vector2(948+i*66,470),Vector2(58,64),"auto"+["P","R","N","D"][i])
+	for i in range(4):
+		_touch(layer,Vector2(1190,16+i*66),Vector2(60,60),["mode","camera","reset","start"][i])
+	_touch(layer,Vector2(24,100),Vector2(58,58),"quality")
+	_touch(layer,Vector2(94,100),Vector2(58,58),"regions")
 
-func _touch(parent: Node, title: String, pos: Vector2, size: Vector2, id: String) -> void:
+func _touch(parent: Node, pos: Vector2, size: Vector2, id: String) -> void:
 	var button := TouchScreenButton.new()
 	var image := Image.create(int(size.x),int(size.y),false,Image.FORMAT_RGBA8)
-	image.fill(Color(0.08,0.13,0.17,0.86))
+	image.fill(Color(0,0,0,0))
 	button.texture_normal=ImageTexture.create_from_image(image)
 	var shape := RectangleShape2D.new()
 	shape.size=size
@@ -111,13 +110,28 @@ func _touch(parent: Node, title: String, pos: Vector2, size: Vector2, id: String
 	button.position=pos
 	button.set_meta("id",id)
 	parent.add_child(button)
-	var label := Label.new()
-	label.text=title
-	label.size=size
-	label.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
-	label.vertical_alignment=VERTICAL_ALIGNMENT_CENTER
-	label.mouse_filter=Control.MOUSE_FILTER_IGNORE
-	button.add_child(label)
+	if id.begins_with("auto"):
+		var label := Label.new()
+		label.text=id.trim_prefix("auto")
+		label.size=size
+		label.add_theme_font_size_override("font_size",24)
+		label.horizontal_alignment=HORIZONTAL_ALIGNMENT_CENTER
+		label.vertical_alignment=VERTICAL_ALIGNMENT_CENTER
+		label.mouse_filter=Control.MOUSE_FILTER_IGNORE
+		var backing := ColorRect.new()
+		backing.size=size
+		backing.color=Color(0.035,0.075,0.11,0.9)
+		backing.mouse_filter=Control.MOUSE_FILTER_IGNORE
+		button.add_child(backing)
+		button.add_child(label)
+	else:
+		var symbol := Node2D.new()
+		symbol.set_script(preload("res://scripts/ui/control_symbol.gd"))
+		symbol.kind=id
+		symbol.extent=size
+		button.add_child(symbol)
+		button.pressed.connect(func(): symbol.active=true)
+		button.released.connect(func(): symbol.active=false)
 	button.pressed.connect(func(): _press(id,true))
 	button.released.connect(func(): _press(id,false))
 	touch_buttons.append(button)
@@ -175,7 +189,8 @@ func _process(delta: float) -> void:
 		camera.global_position=camera.global_position.lerp(desired,minf(1,delta*7))
 		camera.look_at(target)
 	var t = car.transmission
-	hud.text="AZ CAR 3D  |  %s  |  %d km/h  |  %d RPM\nClutch: %d%%  |  %s  |  %d FPS\n%s" % [t.display(),roundi(absf(car.signed_speed)*3.6),roundi(t.rpm),roundi(t.clutch*100),"LOW (30 FPS)" if low_quality else "HIGH (60 FPS)",Engine.get_frames_per_second(),t.message]
+	hud.text="%s  ·  %d km/h  ·  %d RPM  ·  %d FPS\nClutch %d%%  ·  %s  ·  Keep left\n%s" % [t.display(),roundi(absf(car.signed_speed)*3.6),roundi(t.rpm),Engine.get_frames_per_second(),roundi(t.clutch*100),"LOW" if low_quality else "HIGH",t.message]
+	shifter.visible=t.mode==0
 	for button in touch_buttons:
 		var id: String=button.get_meta("id")
 		if id.begins_with("gear") or id=="clutch": button.visible=t.mode==0
@@ -184,6 +199,7 @@ func _process(delta: float) -> void:
 func _notification(what: int) -> void:
 	if what==NOTIFICATION_APPLICATION_FOCUS_OUT and is_instance_valid(car):
 		held.clear()
+		if is_instance_valid(shifter): shifter.cancel()
 		car.release_controls()
 		get_tree().paused=true
 	elif what==NOTIFICATION_APPLICATION_FOCUS_IN: get_tree().paused=false

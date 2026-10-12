@@ -2,7 +2,7 @@ name: AZ Car 3D Colombo APK
 on:
   push:
     branches: [feature/az-car-3d]
-    paths: ['az-car-3d/**', '.github/workflows/az-car-3d-colombo.yml']
+    paths: ['az-car-3d/**', '.github/workflows/az-car-3d-colombo.yml', '.github/workflows/az-car-3d-controls-release.yml']
   workflow_dispatch:
 permissions:
   contents: read

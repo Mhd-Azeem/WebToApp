@@ -50,3 +50,15 @@ The previous prototype remains available with its prior systems.
 Art remains modest: original modular textured buildings, tapered low-detail
 sedan, simple palms and hills. No GTA V-equivalent visual or physics claim.
 Kandy/Galle are inspirations/backdrop/expansion routes, not full city recreations.
+
+## v0.3.0 controls update
+
+Godot 4.5.1 local import/scripts: PASS. Existing transmission and vehicle-collision
+checks: PASS (powered displacement ~40.18m). New checks: clutch required before
+drag; all six H-pattern positions; neutral between columns; vertical-slot lock;
+reverse rejection while moving; gear-release snapping; native concurrent gas,
+clutch and independent lever touch. Software-rendered chase/cockpit images were
+inspected with Xvfb/Mesa: symbol controls, clutch above arrows, gate above brake,
+compact HUD and revised coupe are visible. Physical Android gesture testing and
+Nubia frame times remain unverified. APK export and signing run in the separate
+GitHub Actions workflow before publishing the updated preview.

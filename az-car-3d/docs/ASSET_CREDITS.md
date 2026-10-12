@@ -15,3 +15,8 @@ Google Maps imagery, unlicensed models or paid asset packs are included.
 
 Godot Engine: MIT license, https://godotengine.org/license/ . Export templates
 include Godot and its third-party notices. A production release must retain them.
+
+The v0.3 control symbols and H-pattern panel are original Godot vector drawings.
+The user's VectorStock reference image is not included in the application.
+The revised sport coupe is original unbranded mesh geometry, with no copied
+manufacturer logos or third-party car models.

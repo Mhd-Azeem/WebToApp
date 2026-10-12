@@ -1,0 +1,79 @@
+name: Publish AZ Car 3D controls preview
+on:
+  push:
+    branches: [feature/az-car-3d]
+    paths: ['.github/workflows/az-car-3d-controls-release.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: az-car-3d-controls-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/feature/az-car-3d'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: ${{ github.sha }}
+      RELEASE_TAG: az-car-3d-v0.3.0-controls
+    steps:
+      - name: Wait for verified APK from this exact commit
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 72); do
+            gh api "repos/$GH_REPO/actions/workflows/az-car-3d-colombo.yml/runs?branch=feature%2Faz-car-3d&per_page=15" > runs.json
+            python3 - <<'PY'
+          import json, os
+          runs=json.load(open('runs.json'))['workflow_runs']
+          matches=[r for r in runs if r['head_sha']==os.environ['SOURCE_SHA']]
+          run=matches[0] if matches else {}
+          open('run-id.txt','w').write(str(run.get('id','')))
+          open('run-status.txt','w').write(str(run.get('status','waiting')))
+          open('run-conclusion.txt','w').write(str(run.get('conclusion') or ''))
+          PY
+            status=$(cat run-status.txt)
+            if [ "$status" = completed ]; then
+              test "$(cat run-conclusion.txt)" = success
+              break
+            fi
+            sleep 10
+          done
+          test "$(cat run-conclusion.txt)" = success
+          run=$(cat run-id.txt)
+          gh run download "$run" --name AZ-Car-3D-Colombo-debug --dir release-artifact
+          test -s release-artifact/AZ-Car-3D-Colombo-debug.apk
+          cp release-artifact/AZ-Car-3D-Colombo-debug.apk AZ-Car-3D-v0.3.0-controls.apk
+          sha256sum AZ-Car-3D-v0.3.0-controls.apk > SHA256SUMS.txt
+          echo "SOURCE_RUN=$run" >> "$GITHUB_ENV"
+      - name: Publish controls update as separate prerelease
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'EOF'
+          AZ Car 3D v0.3.0 — symbol controls and draggable H-pattern preview.
+
+          - Symbol-only driving and utility controls; clutch above the left/right arrows.
+          - Fixed round H-pattern shifter above the brake, with a draggable small lever knob.
+          - Top row 1 / 3 / 5; bottom row 2 / 4 / R; neutral across the middle. Slots constrain movement, clutch is required, and reverse is blocked while moving.
+          - Independent simultaneous gas, steering, clutch and lever fingers. P/R/N/D controls remain available in automatic mode.
+          - Smaller top information display and original sport-coupe geometry: sloped roof/glass, grille, alloy spokes, rear diffuser, spoiler and exhausts.
+
+          Hold clutch until the HUD indicates at least 85%, drag the knob left-up for first, apply gas, then release clutch. Pull through the middle neutral channel before changing columns. Power symbol restarts a stalled engine. H/circular-arrow symbol toggles MT/AT while stopped; hold brake to select D in automatic mode.
+
+          Android arm64; target SDK 35 (Android 15), min SDK 24. Debug-signed playable preview. Physical Nubia V70 Max gesture/performance testing remains outstanding. The car is an original unbranded coupe, not an official manufacturer model or photoreal replica. The supplied stock shifter picture is not redistributed. All existing WebToApp files, workflows and releases are preserved; development remains on feature/az-car-3d.
+
+          If installation reports a signing conflict, uninstall only the older AZ Car 3D Colombo preview and install this APK. Do not uninstall WebToApp. SHA256SUMS.txt contains the APK checksum.
+          EOF
+          printf '\nVerified APK build: https://github.com/%s/actions/runs/%s\nSource commit: %s\n' "$GH_REPO" "$SOURCE_RUN" "$SOURCE_SHA" >> release-notes.md
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            echo 'Release exists; refusing to overwrite its assets.'
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" --target "$SOURCE_SHA" --draft --prerelease --latest=false --title 'AZ Car 3D v0.3.0 — Symbol Controls & H-Shifter' --notes-file release-notes.md AZ-Car-3D-v0.3.0-controls.apk SHA256SUMS.txt
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
