@@ -19,6 +19,11 @@ var rear_view: Node
 var pedals := {}
 var desktop_mode := false
 var desktop_help: Label
+var cockpit_overlay: Control
+var headlamps: Array[SpotLight3D] = []
+var wiper_parts: Array[Node3D] = []
+var wipers_on := false
+var wiper_phase := 0.0
 
 func _ready() -> void:
 	var world := Node3D.new()
@@ -89,6 +94,7 @@ func _ready() -> void:
 	interior.add_child(wheel)
 	G.box(interior,Vector3(-0.57,-0.4,-0.68),Vector3(0.13,0.23,0.1),G.material("",Color(0.13,0.14,0.15)))
 	_build_desktop_cockpit()
+	_build_cockpit_equipment()
 	interior.visible=false
 	_hud()
 	traffic.set_enabled(settings.traffic_toggle.button_pressed)
@@ -270,6 +276,10 @@ func _process(delta: float) -> void:
 	gauges.visible=camera_mode in [1,2]
 	interior.visible=cockpit
 	wheel.rotation.z=-car.steering*2.5
+	if wipers_on: wiper_phase+=delta*6.0
+	else: wiper_phase=move_toward(wiper_phase,0.0,delta*6.0)
+	for i in range(wiper_parts.size()):
+		wiper_parts[i].rotation.z=(sin(wiper_phase)*0.65 if wipers_on else 0.0)*(1.0 if i==0 else -1.0)
 	if cockpit:
 		camera.global_position=car.to_global(Vector3(-0.42,1.58,0.5))
 		camera.look_at(camera.global_position+car.global_basis.z*10,car.global_basis.y)
@@ -293,6 +303,7 @@ func _process(delta: float) -> void:
 	camera.global_position+=car.global_basis.y*sin(t.engine.clock*70)*lug*0.012
 	hud.text="%s · %d km/h · %d RPM · %s · %d FPS\nClutch %d%% · Load %d%% · %s\n%s" % [t.display(),roundi(car.linear_velocity.length()*3.6),roundi(t.rpm),t.engine.status(),Engine.get_frames_per_second(),roundi(t.clutch*100),roundi(absf(t.engine.load)*100),"HANDBRAKE" if car.handbrake>0 else ("LOW" if low_quality else "HIGH"),t.message]
 	shifter.visible=t.mode==0 and not desktop_mode
+	cockpit_overlay.visible=cockpit and not settings.visible
 	if t.mode!=0 and pedals.clutch.visible: pedals.clutch.cancel()
 	pedals.clutch.visible=t.mode==0 and not desktop_mode
 	settings.transmission_selector.select(t.mode)
@@ -364,3 +375,41 @@ func _build_desktop_cockpit() -> void:
 		G.box(interior,Vector3(x,-0.34,-0.64),Vector3(0.31,0.055,0.06),trim)
 	for x in [-0.88,0.88]:
 		G.box(interior,Vector3(x,-0.42,-0.72),Vector3(0.36,0.10,0.09),trim)
+
+func _setup_cockpit_overlay() -> void:
+	cockpit_overlay=Control.new()
+	cockpit_overlay.set_script(preload("res://scripts/ui/cockpit_controls.gd"))
+	var layer := CanvasLayer.new()
+	add_child(layer)
+	layer.add_child(cockpit_overlay)
+	cockpit_overlay.headlights_changed.connect(func(enabled: bool):
+		for light in headlamps: light.visible=enabled)
+	cockpit_overlay.wipers_changed.connect(func(enabled: bool): wipers_on=enabled)
+	cockpit_overlay.horn_changed.connect(func(pressed: bool): car.horn=float(pressed))
+
+func _build_cockpit_equipment() -> void:
+	# Cockpit parts are shared by Android and Windows; lights illuminate the world.
+	var dark := G.material("",Color(0.035,0.039,0.045))
+	var chrome := G.material("",Color(0.32,0.34,0.36))
+	var glass := G.material("",Color(0.09,0.14,0.18))
+	for side in [-1.0,1.0]:
+		var lamp := SpotLight3D.new()
+		lamp.position=Vector3(side*0.64,0.62,1.75)
+		lamp.rotation_degrees.x=-7.0
+		lamp.spot_range=42.0
+		lamp.spot_angle=35.0
+		lamp.light_energy=2.0
+		lamp.visible=false
+		car.add_child(lamp)
+		headlamps.append(lamp)
+		var mirror := Node3D.new()
+		mirror.position=Vector3(side*1.35,-0.20,-1.10)
+		interior.add_child(mirror)
+		G.box(mirror,Vector3.ZERO,Vector3(0.43,0.25,0.12),dark)
+		G.box(mirror,Vector3(0,0,-0.065),Vector3(0.36,0.18,0.012),glass)
+		var wiper := Node3D.new()
+		wiper.position=Vector3(side*0.25,-0.40,-1.60)
+		interior.add_child(wiper)
+		G.box(wiper,Vector3(0,0.25,0),Vector3(0.024,0.54,0.03),dark)
+		G.box(wiper,Vector3(0,0.50,0),Vector3(0.07,0.04,0.04),chrome)
+		wiper_parts.append(wiper)
