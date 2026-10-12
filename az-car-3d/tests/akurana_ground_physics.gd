@@ -24,7 +24,7 @@ func _check_terrain() -> void:
 	)
 	query.exclude = [car.get_rid()]
 	query.collision_mask = 1
-	var hit := scene.get_world_3d().direct_space_state.intersect_ray(query)
+	var hit: Dictionary = scene.get_world_3d().direct_space_state.intersect_ray(query)
 	if hit.is_empty():
 		_fail("downward ray passed through both Akurana road and terrain")
 		return
