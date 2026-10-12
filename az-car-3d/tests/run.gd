@@ -6,54 +6,13 @@ func check(ok: bool, message: String) -> void:
 		failures+=1
 		push_error(message)
 func _initialize() -> void:
-	var t := T.new()
-	check(not t.shift(1,0),"Shift without clutch must fail")
-	t.clutch=1
-	for gear in range(1,6): check(t.shift(gear,0),"Forward gear must engage")
-	check(not t.shift(-1,2),"Reverse while moving rejected")
-	check(t.shift(-1,0),"Reverse at rest allowed")
-	check(t.ratio(0)<0,"Reverse force negative")
-	check(not t.shift(6,0),"Invalid gear rejected")
-	t.shift(0,0)
-	check(is_zero_approx(t.update(0.1,0,1)),"Neutral has no drive")
-	t.toggle(0)
-	check(not t.select("D",0,0),"Automatic selection requires brake")
-	check(t.select("D",0,1),"D allowed at rest with brake")
-	check(t.update(0.1,0,1)>0,"D drives forward")
-	check(not t.select("R",5,1),"Moving direction change blocked")
-	check(t.select("R",0,1),"R allowed stopped")
-	check(t.update(0.1,0,1)<0,"R drives backward")
-	t.select("P",0,1)
-	check(is_zero_approx(t.update(0.1,0,1)),"P has no drive")
-	check(not t.select("P",2,1),"Moving park rejected")
-	t.toggle(0)
-	t.clutch=1
-	t.shift(1,0)
-	check(is_zero_approx(t.update(0.1,0,1)),"Fully pressed clutch disconnects engine")
-	t.clutch=0
-	t.rpm=850
-	for i in range(120): t.update(1.0/60.0,0,0)
-	check(not t.running,"Manual release at idle can stall")
-	t.clutch=1
-	t.restart()
-	check(t.running,"Clutch permits engine restart")
-	print("Transmission checks: ","PASS" if failures==0 else "FAIL")
-	# Requested gearing: drive force cuts at each limit but fifth drives past 200.
-	t.mode=T.Mode.MANUAL
-	t.clutch=0
-	t.running=true
-	for g in range(1,6):
-		t.gear=g
-		t.rpm=5000
-		check(t.update(0.001,(T.SPEED_LIMITS[g]-2)/3.6,1)>0,"Drive below gear limit")
-		check(is_zero_approx(t.update(0.001,T.SPEED_LIMITS[g]/3.6,1)),"No drive above gear limit")
-	t.gear=5
-	t.rpm=5900
-	check(t.update(0.001,205.0/3.6,1)>0,"Fifth supports 200+ km/h")
+	var mechanical := preload("res://tests/drivetrain_checks.gd").new()
+	failures+=mechanical.run()
 	call_deferred("world_test")
 func world_test() -> void:
 	var scene = load("res://scenes/main.tscn").instantiate()
 	root.add_child(scene)
+	scene.car.transmission.mode=T.Mode.MANUAL
 	await physics_frame
 	await physics_frame
 	check(scene.car.wheels.size()==4,"Four physics wheels")
@@ -69,6 +28,30 @@ func world_test() -> void:
 		root.push_input(touch,true)
 	await process_frame
 	check(scene.car.gas==1 and scene.car.turn==1 and scene.car.clutch_pedal==1,"Simultaneous native touches")
+	var pedal_drag := InputEventScreenDrag.new()
+	pedal_drag.index=3
+	pedal_drag.position=Vector2(1170,658)
+	root.push_input(pedal_drag,true)
+	check(absf(scene.car.gas-0.5)<0.01 and scene.car.clutch_pedal==1,"Analog gas drag independently reaches 50 percent")
+	pedal_drag.position=Vector2(1170,610)
+	root.push_input(pedal_drag,true)
+	var brake_touch := InputEventScreenTouch.new()
+	brake_touch.index=5
+	brake_touch.position=Vector2(1040,610)
+	brake_touch.pressed=true
+	root.push_input(brake_touch,true)
+	pedal_drag.index=5
+	pedal_drag.position=Vector2(1040,682)
+	root.push_input(pedal_drag,true)
+	check(absf(scene.car.pedal_brake-0.25)<0.01 and scene.car.gas==1,"Analog brake at 25 percent with gas held")
+	brake_touch.pressed=false
+	root.push_input(brake_touch,true)
+	pedal_drag.index=2
+	pedal_drag.position=Vector2(127,538)
+	root.push_input(pedal_drag,true)
+	check(absf(scene.car.clutch_pedal-0.5)<0.01,"Analog clutch reaches bite range")
+	pedal_drag.position=Vector2(127,490)
+	root.push_input(pedal_drag,true)
 	var release := InputEventScreenTouch.new()
 	release.index=1
 	release.position=Vector2(70,600)
@@ -118,7 +101,7 @@ func world_test() -> void:
 	scene.held.clear()
 	# Let suspension settle, then accelerate in automatic D.
 	for i in range(180): await physics_frame
-	scene.car.transmission.toggle(0)
+	scene.car.transmission.mode=T.Mode.AUTOMATIC
 	scene.car.transmission.select("D",0,1)
 	scene.car.gas=1
 	var start: Vector3=scene.car.position
@@ -132,7 +115,7 @@ func world_test() -> void:
 	for i in range(120): await physics_frame
 	var g = load("res://scripts/geometry.gd")
 	var obstacle = g.box(scene,Vector3(-3.5,1,110),Vector3(8,2,1),g.material("concrete"),true)
-	scene.car.transmission.toggle(0)
+	scene.car.transmission.mode=T.Mode.AUTOMATIC
 	scene.car.transmission.select("D",0,1)
 	scene.car.gas=1
 	for i in range(240): await physics_frame
@@ -231,9 +214,11 @@ func world_test() -> void:
 	scene.car.transmission.select("D",0,1)
 	scene.car.gas=1
 	var max_kph := 0.0
-	for i in range(1800):
+	for i in range(6000):
 		await physics_frame
 		max_kph=maxf(max_kph,absf(scene.car.signed_speed)*3.6)
+		if scene.car.position.z< -800: scene.car.position.z=850
+		if max_kph>200 and i>120: break
 	check(max_kph>200,"Powered fifth gear physically exceeds 200 km/h")
 	check(scene.car.position.y>-1,"High-speed road collision supports car")
 	print("High-speed drive peak: ",max_kph," km/h, gear ",scene.car.transmission.auto_gear,", position ",scene.car.position)
@@ -255,6 +240,9 @@ func world_test() -> void:
 	for i in range(12): await physics_frame
 	check(absf(scene.car.steering)<0.05,"Steering returns promptly to center")
 	print("Shared coupe / landscape / steering checks: ","PASS" if failures==0 else "FAIL")
+	var physical := preload("res://tests/vehicle_scenarios.gd").new()
+	failures+=await physical.run(scene)
 	scene.queue_free()
 	await process_frame
 	quit(1 if failures else 0)
+

@@ -1,81 +1,142 @@
 extends Node
-# Original procedural audio; no third-party recordings.
-const RATE := 16000.0
-var player: AudioStreamPlayer
-var playback: AudioStreamGeneratorPlayback
+# Original procedural PCM loops; native Godot mixing, no per-sample render loop.
+const RATE := 16000
+static var cache := {}
 var car: VehicleBody3D
-var phase := 0.0
-var clock := 0.0
-var smooth_rpm := 850.0
-var gain := 0.0
-var start_left := 0.7
-var shift_left := 0.0
-var drop_left := 0.0
-var last_gear := ""
+var layers: Array[AudioStreamPlayer] = []
+var references := PackedFloat32Array()
+var noises := {}
+var starter: AudioStreamPlayer
+var shift_sound: AudioStreamPlayer
+var grind_sound: AudioStreamPlayer
+var lifecycle: AudioStreamPlayer
+var ignition: AudioStreamPlayer
 var last_ignition := 0
-var last_throttle := 0.0
-var noise := RandomNumberGenerator.new()
-var filtered_noise := 0.0
-var motor_table := PackedFloat32Array()
-
+var last_shift := 0
+var last_grind := 0
+var last_stall := 0
+var last_shutdown := 0
+var frequency := 0.0
+var audible_rpm := 800.0
+var engine_mix := 0.0
+var layer_weights := PackedFloat32Array()
 func _ready() -> void:
-	noise.seed=32003
-	motor_table.resize(2048)
-	for i in range(2048):
-		var p := TAU*i/2048.0
-		motor_table[i]=sin(p)*0.55+sin(p*2)*0.25+sin(p*3)*0.12
-	player=AudioStreamPlayer.new()
-	var stream := AudioStreamGenerator.new()
+	references=car.transmission.config.audio_references
+	layer_weights.resize(references.size())
+	for i in range(references.size()):
+		layers.append(_player(_stream("engine"+str(i),references[i]*car.transmission.config.engine_cylinders/120.0,1.5,true)))
+	for kind in ["rolling","wind","skid","brake","horn"]:
+		noises[kind]=_player(_stream(kind,0,1.5,true))
+	starter=_player(_stream("starter",0,1.5,true))
+	shift_sound=_player(_stream("shift",0,0.12,false),false)
+	grind_sound=_player(_stream("grind",0,0.22,false),false)
+	lifecycle=_player(_stream("stall",0,0.4,false),false)
+	ignition=_player(_stream("ignition",0,0.10,false),false)
+	last_ignition=car.transmission.engine.ignition_serial
+	last_stall=car.transmission.engine.stall_serial
+	last_shutdown=car.transmission.engine.shutdown_serial
+func _player(stream: AudioStreamWAV,looping: bool = true) -> AudioStreamPlayer:
+	var p := AudioStreamPlayer.new()
+	p.stream=stream
+	p.volume_db=-80
+	add_child(p)
+	if looping: p.play()
+	return p
+static func _stream(kind: String,hz: float,duration: float,looping: bool) -> AudioStreamWAV:
+	var key := kind+str(hz)+str(duration)
+	if cache.has(key): return cache[key]
+	var bytes := PackedByteArray()
+	var frames := roundi(duration*RATE)
+	bytes.resize(frames*2)
+	var rng := RandomNumberGenerator.new()
+	rng.seed=32003
+	var filtered := 0.0
+	for i in range(frames):
+		var time := float(i)/RATE
+		var phase := TAU*hz*time
+		var n := rng.randf_range(-1,1)
+		filtered=lerpf(filtered,n,0.14 if kind!="wind" else 0.025)
+		var v := 0.0
+		if kind.begins_with("engine"):
+			var index := int(kind.trim_prefix("engine"))
+			v=sin(phase)*0.19+sin(phase*2)*0.08+sin(phase*3)*0.045
+			v+=sin(phase*4)*(0.012+index*0.012)+sin(phase*6)*index*0.008
+		elif kind=="horn": v=(sin(TAU*440*time)+sin(TAU*554*time))*0.16
+		elif kind=="starter": v=sin(TAU*45*time)*0.1+sin(TAU*130*time)*0.08+filtered*0.12
+		elif kind=="skid": v=sin(TAU*1450*time)*0.13+filtered*0.15
+		elif kind=="shift": v=filtered*0.65*exp(-time*28)+sin(TAU*250*time)*0.1*exp(-time*40)
+		elif kind=="ignition": v=filtered*0.5*exp(-time*45)
+		elif kind=="grind": v=n*0.23+sin(TAU*180*time)*0.12
+		elif kind=="stall" or kind=="shutdown": v=sin(TAU*(40*time-30*time*time))*0.25*exp(-time*8)+filtered*0.08
+		else: v=filtered*0.5
+		# Noise loops have short edge fades; the harmonic engine loops have
+		# integer cycle counts and are inherently continuous at their seam.
+		if not kind.begins_with("engine"):
+			v*=minf(1,minf(float(i)/80,float(frames-1-i)/80))
+		var sample := roundi(clampf(v,-1,1)*32767)
+		bytes[i*2]=sample&255
+		bytes[i*2+1]=(sample>>8)&255
+	var stream := AudioStreamWAV.new()
+	stream.format=AudioStreamWAV.FORMAT_16_BITS
 	stream.mix_rate=RATE
-	stream.buffer_length=0.12
-	player.stream=stream
-	player.volume_db=-8.0
-	add_child(player)
-	player.play()
-	playback=player.get_stream_playback() as AudioStreamGeneratorPlayback
-
-func _process(_delta: float) -> void:
-	if not is_instance_valid(car) or playback==null: return
+	stream.data=bytes
+	if looping:
+		stream.loop_mode=AudioStreamWAV.LOOP_FORWARD
+		stream.loop_begin=0
+		stream.loop_end=frames
+	cache[key]=stream
+	return stream
+func _volume(p: AudioStreamPlayer,target: float,delta: float,rate: float = 14.0) -> void:
+	target*=0.72 # Reserve headroom for simultaneous horn, tires and mechanical events.
+	var gain := db_to_linear(p.volume_db)
+	gain=lerpf(gain,target,1-exp(-delta*rate))
+	p.volume_db=linear_to_db(maxf(0.00001,gain))
+	if target>0.0001 and not p.playing: p.play()
+	elif target==0 and gain<0.0001 and p.playing: p.stop()
+func _process(delta: float) -> void:
+	if not is_instance_valid(car): return
 	var t = car.transmission
-	var throttle: float=car.effective_gas
-	if t.ignition_serial!=last_ignition:
-		last_ignition=t.ignition_serial
-		start_left=0.7
-	var gear: String=t.display()
-	if gear!=last_gear and not last_gear.is_empty(): shift_left=0.12
-	last_gear=gear
-	if last_throttle>0.5 and throttle<0.15 and t.rpm>2000: drop_left=0.22
-	last_throttle=throttle
-	var horn_on: bool = car.horn>0 or Input.is_key_pressed(KEY_H)
+	var e = t.engine
+	if e.ignition_serial!=last_ignition:
+		ignition.volume_db=-10
+		ignition.play()
+	audible_rpm=lerpf(audible_rpm,maxf(100,e.rpm),1-exp(-delta*18))
+	frequency=audible_rpm*car.transmission.config.engine_cylinders/120.0
+	var load := clampf(absf(e.load),0,1)
+	engine_mix=(0.32+load*0.42+e.throttle*0.22) if e.running else 0.0
+	if e.ignition_cut: engine_mix*=0.06
+	for i in range(layers.size()):
+		var weight := 0.0
+		if i==0 and audible_rpm<=references[0]: weight=1
+		elif i==layers.size()-1 and audible_rpm>=references[i]: weight=1
+		elif audible_rpm>=references[i] and i+1<layers.size(): weight=1-clampf((audible_rpm-references[i])/(references[i+1]-references[i]),0,1)
+		elif i>0 and audible_rpm<=references[i]: weight=clampf((audible_rpm-references[i-1])/(references[i]-references[i-1]),0,1)
+		layer_weights[i]=weight
+		layers[i].pitch_scale=clampf(audible_rpm/references[i],0.25,4)
+		_volume(layers[i],weight*engine_mix,delta,35 if e.ignition_cut else 14)
+	_volume(starter,0.75 if e.state==1 else 0.0,delta)
+	starter.pitch_scale=clampf(maxf(150,e.rpm)/400,0.5,1.7)
+	if t.shift_serial!=last_shift:
+		last_shift=t.shift_serial
+		shift_sound.volume_db=-7
+		shift_sound.play()
+	if t.grind_serial!=last_grind:
+		last_grind=t.grind_serial
+		grind_sound.volume_db=-8
+		grind_sound.play()
+	if e.stall_serial!=last_stall or e.shutdown_serial!=last_shutdown:
+		var stalled: bool=e.stall_serial!=last_stall
+		last_stall=e.stall_serial
+		last_shutdown=e.shutdown_serial
+		lifecycle.stream=_stream("stall" if stalled else "shutdown",0,0.4,false)
+		lifecycle.volume_db=-6
+		lifecycle.play()
+	last_ignition=e.ignition_serial
 	var speed := car.linear_velocity.length()
-	var tire := 0.0
-	for w in car.wheels:
-		if w.is_in_contact(): tire=maxf(tire,clampf(1.0-w.get_skidinfo(),0,1))
-	var braking: float=car.effective_brake*clampf((speed-2.0)/15.0,0,1)
-	# Fill all available frames to avoid starvation at low frame rates.
-	for i in range(playback.get_frames_available()):
-		clock+=1.0/RATE
-		start_left=maxf(0,start_left-1.0/RATE)
-		shift_left=maxf(0,shift_left-1.0/RATE)
-		drop_left=maxf(0,drop_left-1.0/RATE)
-		smooth_rpm=move_toward(smooth_rpm,maxf(700,t.rpm),18000.0/RATE)
-		gain=move_toward(gain,(0.10+throttle*0.14) if t.running else 0.0,2.0/RATE)
-		var hz := smooth_rpm/30.0
-		if start_left>0.25: hz=35.0+(0.7-start_left)*80.0
-		phase=fposmod(phase+TAU*hz/RATE,TAU)
-		var white := noise.randf_range(-1,1)
-		filtered_noise=lerpf(filtered_noise,white,0.18)
-		var index := phase*2048.0/TAU
-		var slot := int(index)%2048
-		var motor := lerpf(motor_table[slot],motor_table[(slot+1)%2048],index-floorf(index))
-		var limiter := 0.6 if smooth_rpm>6250 and sin(clock*TAU*24)>0 else 1.0
-		var v := motor*gain*limiter*(0.45 if shift_left>0 else 1.0)
-		v+=filtered_noise*throttle*gain*0.3
-		if start_left>0 and t.running: v+=sin(clock*TAU*48)*0.07*start_left
-		if shift_left>0: v+=filtered_noise*shift_left*0.3
-		if drop_left>0: v+=sin(phase*0.5)*drop_left*0.16
-		v+=white*braking*0.025
-		if tire>0.01: v+=(sin(clock*TAU*1450)*0.045+white*0.06)*tire*clampf(speed/8,0,1)
-		if horn_on: v+=(sin(clock*TAU*440)+sin(clock*TAU*554))*0.10
-		v=clampf(v,-0.85,0.85)
-		playback.push_frame(Vector2(v,v))
+	var road := clampf(speed/45,0,1) if car.wheel_physics.grounded else 0.0
+	_volume(noises.rolling,road*0.45,delta)
+	noises.rolling.pitch_scale=clampf(speed/16,0.5,2.0)
+	_volume(noises.wind,pow(clampf(speed/65,0,1),1.7)*0.65,delta)
+	_volume(noises.brake,car.effective_brake*clampf((speed-1)/12,0,1)*0.22,delta)
+	_volume(noises.skid,car.wheel_physics.skid*clampf(speed/8,0,1)*0.8,delta)
+	_volume(noises.horn,0.8 if car.horn>0 or Input.is_key_pressed(KEY_H) else 0.0,delta,25)

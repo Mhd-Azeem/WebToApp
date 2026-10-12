@@ -1,0 +1,5 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+[ext_resource type="Script" path="res://scripts/drivetrain/vehicle_configuration.gd" id="1"]
+[resource]
+script = ExtResource("1")
+forward_ratios = PackedFloat32Array(0, 3.5, 2.1, 1.4, 1.0, 0.8)

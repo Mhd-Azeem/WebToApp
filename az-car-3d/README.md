@@ -15,8 +15,7 @@ changing columns. Release it to snap into the actual selected gear. Rejected
 shifts flash red and keep the knob synchronized with the gearbox.
 
 Gas, brake, steering, clutch and the gear lever track independent touch fingers.
-Releasing clutch mid-drag cancels further lever movement. Clutch engagement ramps
-over ~0.33 seconds. Apply gas while gently releasing clutch; release at idle in
+Releasing clutch mid-drag cancels further lever movement. Pedals support analog pressure: hold and slide down to reduce input. Apply gas while gently releasing clutch; release at idle in
 gear can stall. Hold clutch and tap the power symbol to restart. Reverse is blocked
 while moving. The H-with-circular-arrow symbol toggles MT/AT while stopped.
 Automatic mode replaces the H gate with P/R/N/D selectors; hold brake while stopped
@@ -31,11 +30,11 @@ photoreal licensed replica. The reference gear illustration is not redistributed
 only the standard gear arrangement is reproduced with original vector drawing.
 
 Keyboard: W gas, S brake, A/D steer, C clutch, 1–5 gears, R reverse, N neutral,
-M transmission, E restart, V chase/right-hand-drive cockpit. In automatic mode,
+M transmission, E engine start/stop, Space handbrake, V chase/cockpit/hood. In automatic mode,
 hold S and use P/R/F for P/R/D. RESET recovers an overturned/stuck vehicle.
 
 The connected district includes intersections, crossings and buildings with
-physical collision. Keep left and yield at junctions. No AI traffic yet.
+physical collision. Keep left and yield at junctions. Optional colored AI traffic is available in Settings.
 The folded-map control displays implemented and planned areas. See `docs/MAP.md`.
 
 ## Android build
@@ -46,8 +45,8 @@ branch or manually run that workflow **on feature/az-car-3d**. Download the
 Package: `com.azeem.azcar3d.colombo`, arm64, min SDK 24, target SDK 35 (Android 15).
 Separate ID prevents overwriting the earlier prototype or WebToApp application.
 No network permission, accounts or backend. This is a debug APK, not a signed
-production release. CI debug signing may change across runs, requiring uninstall
-before updating; install a persistent release signing key before distribution.
+production release. CI retains a cached preview signing key for updates. A production distribution
+still needs a dedicated release signing key.
 
 Local export requires Java 17, Android SDK tools, build-tools 35.0.1, platform 35,
 Godot Android templates matching 4.5.1, and a debug keystore. Configure SDK/JDK
@@ -72,15 +71,14 @@ multi-touch, aspect ratio/safe areas, thermal throttling, driver stability, memo
 collision and sustained frame times on that phone. Touch controls use a 1280×720
 stretched canvas; extra-wide screens and cutouts require device validation.
 
-Godot VehicleBody3D is a simplified raycast vehicle model. Gearing, clutch,
-engine stall, RPM and selector guards are implemented, but this is not a validated
-real-car simulation: no differential, tire temperature, gearbox damage, adaptive
-shifts or torque converter simulation. Handling needs device/user tuning.
-No claim of GTA V fidelity. Current scenery is a textured modular vertical slice;
-see `docs/VALIDATION.md` for actual checks and outstanding work.
+v0.6 adds a shared physical engine/clutch/gearbox model, torque converter and
+kickdown, analog pedals, handbrake, RPM-synchronized layered audio and analog
+instruments in both hood and cockpit. See [drivetrain documentation](docs/DRIVETRAIN_SIMULATION.md)
+for controls, configuration, measured validation and simulation limits.
 
 Driving update: open the gear icon for saved traffic and performance settings. Traffic is off by default. Reverse shows a rear-camera inset. Gear limits are 40 / 60 / 80 / 120 / 220 km/h. See docs/DRIVING_UPDATE.md. Every successful branch build refreshes the az-car-3d-latest GitHub release APK.
 
 v0.5 adds more sensitive steering, the player coupe in eight traffic colors,
 rolling terrain, hills, trees, shrubs, rocks, city parks, beach and sea. See
 docs/LANDSCAPE_UPDATE.md for the generated scenery and mobile rendering limits.
+

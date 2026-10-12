@@ -28,3 +28,7 @@ audio assets are redistributed. Hood dials are original Godot vector drawings.
 The v0.5 shared coupe, colored traffic variants, generated terrain, tree and
 shrub meshes, rock shapes, park paths and benches are original procedural art.
 No external vegetation, terrain or car models were downloaded or redistributed.
+
+The v0.6 generated PCM audio waveforms are original procedural works, dedicated
+to the public domain under CC0 1.0 Universal. No external recordings are used.
+https://creativecommons.org/publicdomain/zero/1.0/

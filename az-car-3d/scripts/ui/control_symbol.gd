@@ -16,6 +16,14 @@ func _draw() -> void:
 	draw_circle(Vector2.ZERO,43,Color(0.035,0.075,0.11,0.82))
 	draw_arc(Vector2.ZERO,42,0,TAU,48,Color(0.35,0.77,0.85) if active else Color(0.45,0.56,0.63,0.70),2,true)
 	match kind:
+		"handbrake":
+			draw_circle(Vector2.ZERO,21,INK,false,3,true)
+			line(Vector2(-28,-16),Vector2(-28,16),3)
+			line(Vector2(28,-16),Vector2(28,16),3)
+			line(Vector2(-7,-12),Vector2(-7,14),3)
+			draw_arc(Vector2(0,-5),8,-PI/2,PI/2,16,INK,3,true)
+			line(Vector2(-7,-13),Vector2(0,-13),3)
+			line(Vector2(-7,3),Vector2(0,3),3)
 		"settings":
 			draw_circle(Vector2.ZERO,18,INK,false,3,true)
 			draw_circle(Vector2.ZERO,7,INK,false,3,true)

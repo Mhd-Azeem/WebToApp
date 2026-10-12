@@ -29,12 +29,12 @@ func gate_gear(pos: Vector2) -> int:
 	return [1,3,5][column] if pos.y<0 else [2,4,-1][column]
 
 func _manual_ready() -> bool:
-	return is_instance_valid(vehicle) and vehicle.transmission.mode==0 and vehicle.transmission.clutch>=0.85
+	return is_instance_valid(vehicle) and vehicle.controls_enabled and vehicle.transmission.mode==0 and vehicle.transmission.clutch>=0.85
 
 func begin(point: Vector2, index: int) -> bool:
 	if finger!=-1 or point.distance_to(knob)>KNOB_RADIUS+16: return false
 	if not _manual_ready():
-		if is_instance_valid(vehicle): vehicle.transmission.message="Hold the clutch before dragging the gear lever"
+		if is_instance_valid(vehicle): vehicle.transmission.reject_shift("Hold the clutch before dragging the gear lever")
 		blocked_until=Time.get_ticks_msec()+600
 		queue_redraw()
 		return false

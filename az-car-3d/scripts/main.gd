@@ -16,6 +16,7 @@ var shifter: Node2D
 var traffic: Node3D
 var settings: PanelContainer
 var rear_view: Node
+var pedals := {}
 
 func _ready() -> void:
 	var world := Node3D.new()
@@ -89,6 +90,8 @@ func _ready() -> void:
 	_hud()
 	traffic.set_enabled(settings.traffic_toggle.button_pressed)
 	_apply_quality(settings.quality_toggle.button_pressed)
+	if settings.saved.get_value("driving","automatic",false): car.transmission.toggle(0)
+	settings.transmission_selector.select(car.transmission.mode)
 
 func _hud() -> void:
 	var layer := CanvasLayer.new()
@@ -98,7 +101,11 @@ func _hud() -> void:
 	layer.add_child(settings)
 	settings.traffic_changed.connect(func(value: bool): traffic.set_enabled(value))
 	settings.quality_changed.connect(_apply_quality)
-	settings.visibility_changed.connect(func(): car.controls_enabled=not settings.visible)
+	settings.visibility_changed.connect(_settings_visibility)
+	settings.transmission_changed.connect(func(mode: int):
+		if mode!=car.transmission.mode and car.transmission.toggle(car.signed_speed):
+			settings._save("automatic",mode==1)
+		settings.transmission_selector.select(car.transmission.mode))
 	rear_view=Node.new()
 	rear_view.set_script(preload("res://scripts/rear_camera.gd"))
 	add_child(rear_view)
@@ -122,9 +129,10 @@ func _hud() -> void:
 	layer.add_child(hud)
 	_touch(layer,Vector2(24,560),Vector2(96,96),"left")
 	_touch(layer,Vector2(134,560),Vector2(96,96),"right")
-	_touch(layer,Vector2(79,444),Vector2(96,96),"clutch")
-	_touch(layer,Vector2(990,560),Vector2(104,104),"brake")
-	_touch(layer,Vector2(1120,560),Vector2(104,104),"gas")
+	_analog(layer,Vector2(79,444),Vector2(96,96),"clutch")
+	_analog(layer,Vector2(990,560),Vector2(104,104),"brake")
+	_analog(layer,Vector2(1120,560),Vector2(104,104),"gas")
+	_touch(layer,Vector2(900,585),Vector2(72,72),"handbrake")
 	shifter=Node2D.new()
 	shifter.set_script(preload("res://scripts/ui/h_shifter.gd"))
 	shifter.position=Vector2(1042,422)
@@ -179,19 +187,46 @@ func _touch(parent: Node, pos: Vector2, size: Vector2, id: String) -> void:
 	button.released.connect(func(): _press(id,false))
 	touch_buttons.append(button)
 
+func _analog(parent: Node,pos: Vector2,size: Vector2,id: String) -> void:
+	var pedal := Node2D.new()
+	pedal.set_script(preload("res://scripts/ui/analog_pedal.gd"))
+	pedal.kind=id
+	pedal.extent=size
+	pedal.position=pos
+	parent.add_child(pedal)
+	pedal.changed.connect(func(value: float): _pedal(id,value))
+	pedals[id]=pedal
+
+func _pedal(id: String,value: float) -> void:
+	match id:
+		"gas": car.gas=value
+		"brake": car.pedal_brake=value
+		"clutch": car.clutch_pedal=value
+
+func _settings_visibility() -> void:
+	car.controls_enabled=not settings.visible
+	for pedal in pedals.values():
+		pedal.enabled=not settings.visible
+		if settings.visible: pedal.cancel()
+	if settings.visible:
+		held.clear()
+		car.release_controls()
+		shifter.cancel()
+
 func _press(id: String, down: bool) -> void:
 	if settings.visible and id!="settings": return
 	held[id]=down
 	car.horn=float(held.get("horn",false))
-	car.gas=float(held.get("gas",false))
-	car.pedal_brake=float(held.get("brake",false))
-	car.clutch_pedal=float(held.get("clutch",false))
+	if id in ["gas","brake","clutch"]: _pedal(id,float(down))
 	car.turn=float(held.get("left",false))-float(held.get("right",false))
 	if not down: return
 	if id.begins_with("gear"): car.transmission.shift(int(id.trim_prefix("gear")),car.signed_speed)
 	elif id.begins_with("auto"): car.transmission.select(id.trim_prefix("auto"),car.signed_speed,maxf(car.pedal_brake,float(Input.is_key_pressed(KEY_S))))
-	elif id=="mode": car.transmission.toggle(car.signed_speed)
-	elif id=="start": car.transmission.restart()
+	elif id=="mode":
+		car.transmission.toggle(car.signed_speed)
+		settings.transmission_selector.select(car.transmission.mode)
+	elif id=="handbrake": car.handbrake=1-car.handbrake
+	elif id=="start": car.transmission.start_stop()
 	elif id=="reset": car.reset()
 	elif id=="camera": camera_mode=(camera_mode+1)%3
 	elif id=="settings":
@@ -209,7 +244,8 @@ func _input(event: InputEvent) -> void:
 		var t = car.transmission
 		if event.keycode==KEY_M: t.toggle(car.signed_speed)
 		elif event.keycode==KEY_V: camera_mode=(camera_mode+1)%3
-		elif event.keycode==KEY_E: t.restart()
+		elif event.keycode==KEY_E: t.start_stop()
+		elif event.keycode==KEY_SPACE: car.handbrake=1-car.handbrake
 		elif event.keycode==KEY_P: t.select("P",car.signed_speed,float(Input.is_key_pressed(KEY_S)))
 		elif event.keycode==KEY_R:
 			if t.mode==0: t.shift(-1,car.signed_speed)
@@ -222,7 +258,7 @@ func _input(event: InputEvent) -> void:
 
 func _process(delta: float) -> void:
 	cockpit=camera_mode==1
-	gauges.visible=camera_mode==2
+	gauges.visible=camera_mode in [1,2]
 	interior.visible=cockpit
 	wheel.rotation.z=-car.steering*2.5
 	if cockpit:
@@ -244,12 +280,19 @@ func _process(delta: float) -> void:
 		camera.global_position=camera.global_position.lerp(desired,minf(1,delta*7))
 		camera.look_at(target)
 	var t = car.transmission
-	hud.text="%s  ·  %d km/h  ·  %d RPM  ·  %d FPS\nClutch %d%%  ·  %s  ·  Keep left\n%s" % [t.display(),roundi(absf(car.signed_speed)*3.6),roundi(t.rpm),Engine.get_frames_per_second(),roundi(t.clutch*100),"LOW" if low_quality else "HIGH",t.message]
+	var lug := clampf((car.transmission.config.idle_rpm-t.rpm)/300,0,1) if t.running else 0.0
+	camera.global_position+=car.global_basis.y*sin(t.engine.clock*70)*lug*0.012
+	hud.text="%s · %d km/h · %d RPM · %s · %d FPS\nClutch %d%% · Load %d%% · %s\n%s" % [t.display(),roundi(car.linear_velocity.length()*3.6),roundi(t.rpm),t.engine.status(),Engine.get_frames_per_second(),roundi(t.clutch*100),roundi(absf(t.engine.load)*100),"HANDBRAKE" if car.handbrake>0 else ("LOW" if low_quality else "HIGH"),t.message]
 	shifter.visible=t.mode==0
+	if t.mode!=0 and pedals.clutch.visible: pedals.clutch.cancel()
+	pedals.clutch.visible=t.mode==0
+	settings.transmission_selector.select(t.mode)
 	for button in touch_buttons:
 		var id: String=button.get_meta("id")
 		if id.begins_with("gear") or id=="clutch": button.visible=t.mode==0
 		if id.begins_with("auto"): button.visible=t.mode==1
+		if id in ["handbrake","start"]:
+			button.get_child(0).active=car.handbrake>0 if id=="handbrake" else (t.running or t.engine.state==1)
 
 func _apply_quality(low: bool) -> void:
 	low_quality=low
@@ -265,6 +308,7 @@ func _notification(what: int) -> void:
 		held.clear()
 		if is_instance_valid(shifter): shifter.cancel()
 		car.release_controls()
+		for pedal in pedals.values(): pedal.cancel()
 		get_tree().paused=true
 	elif what==NOTIFICATION_APPLICATION_FOCUS_IN: get_tree().paused=false
 
