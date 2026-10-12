@@ -69,7 +69,7 @@ func _physics_process(delta: float) -> void:
 		b=1
 	effective_gas=t
 	effective_brake=b
-	var c := maxf(clutch_pedal,float(Input.is_key_pressed(KEY_C)))
+	var c := maxf(clutch_pedal,float((Input.is_key_pressed(KEY_SHIFT) if OS.has_feature("pc") else Input.is_key_pressed(KEY_C))))
 	if not controls_enabled: c=1
 	transmission.clutch=move_toward(transmission.clutch,c,delta*7.0)
 	var steer_input := turn + float(Input.is_key_pressed(KEY_A))-float(Input.is_key_pressed(KEY_D))
