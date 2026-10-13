@@ -108,6 +108,12 @@ func _spawn_akurana() -> void:
 	car.transmission.message = "Akurana: spawned on mapped road"
 
 func _press(id: String, down: bool) -> void:
+	if id=="quality" and down:
+		if not settings.visible:
+			var preset:=1 if low_quality else 0
+			settings.selectors.preset.option.select(preset)
+			settings.selectors.preset.option.item_selected.emit(preset)
+		return
 	super._press(id, down)
 	if id == "reset" and down:
 		_spawn_akurana()

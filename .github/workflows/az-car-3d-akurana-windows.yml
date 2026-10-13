@@ -6,6 +6,7 @@ on:
     paths:
       - 'az-car-3d/**'
       - '.github/workflows/az-car-3d-akurana-windows.yml'
+      - '.github/workflows/az-car-3d-akurana.yml'
 permissions:
   contents: read
 jobs:

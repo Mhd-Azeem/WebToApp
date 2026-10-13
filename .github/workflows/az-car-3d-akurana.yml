@@ -86,9 +86,9 @@ jobs:
           set -euo pipefail
           sudo apt-get update -q
           sudo apt-get install -y xvfb libgl1-mesa-dri libglx-mesa0
-          xvfb-run -a godot --path az-car-3d --rendering-method gl_compatibility --script res://tests/akurana_instances.gd 2>&1 | tee az-car-3d/build/instances.log
+          xvfb-run -a godot --audio-driver Dummy --path az-car-3d --rendering-method gl_compatibility --script res://tests/akurana_instances.gd 2>&1 | tee az-car-3d/build/instances.log
           if grep -E 'SCRIPT ERROR|ERROR:' az-car-3d/build/instances.log; then exit 1; fi
-          xvfb-run -a godot --path az-car-3d --rendering-method gl_compatibility --script res://tests/akurana_render.gd 2>&1 | tee az-car-3d/build/visual.log
+          xvfb-run -a godot --audio-driver Dummy --path az-car-3d --rendering-method gl_compatibility --script res://tests/akurana_render.gd 2>&1 | tee az-car-3d/build/visual.log
           if grep -E 'SCRIPT ERROR|ERROR:' az-car-3d/build/visual.log; then exit 1; fi
           python3 az-car-3d/tools/check_visual_outputs.py
       - name: Prove car stays on physical Akurana terrain under gravity
