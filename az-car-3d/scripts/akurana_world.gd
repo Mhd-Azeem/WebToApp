@@ -7,8 +7,8 @@ const GRID_SIZE = 25
 const HALF_SIZE = 640.0
 # Each GIS height sample spans ~53 m. Subdivision is essential: otherwise
 # the physics/visible triangle surface diverges sharply from height_at().
-const TERRAIN_SUBDIVISIONS = 8
-const ROAD_CLEARANCE = 0.08
+const TERRAIN_SUBDIVISIONS = 12
+const ROAD_CLEARANCE = 0.13
 const TWO_WAY_MIN_WIDTH = 6.8
 const SHOULDER_WIDTH = 1.6
 var heights: PackedByteArray = PackedByteArray()
@@ -177,9 +177,31 @@ func _quad(tool: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3) ->
 	_triangle(tool,a,b,c)
 	_triangle(tool,c,b,d)
 
+func _road_join(path: Array, index: int) -> Vector2:
+	# Shared miter at polyline vertices. Unlike per-segment perpendiculars,
+	# both neighboring road pieces now use exactly the same edge coordinates.
+	var point := Vector2(float(path[index][0]),float(path[index][1]))
+	var before := point
+	var after := point
+	if index > 0:
+		before = Vector2(float(path[index-1][0]),float(path[index-1][1]))
+	if index+1 < path.size():
+		after = Vector2(float(path[index+1][0]),float(path[index+1][1]))
+	var incoming := (point-before).normalized()
+	var outgoing := (after-point).normalized()
+	if incoming.length_squared() < 0.01: incoming=outgoing
+	if outgoing.length_squared() < 0.01: outgoing=incoming
+	var forward := (incoming+outgoing).normalized()
+	if forward.length_squared() < 0.01: forward=outgoing
+	var perpendicular := Vector2(-forward.y,forward.x)
+	var side := Vector2(-outgoing.y,outgoing.x)
+	# Restrict long spikes at extremely sharp bends.
+	var denominator := maxf(0.55,absf(perpendicular.dot(side)))
+	return perpendicular / denominator
+
 func _generate_roads(roads: Array) -> void:
-	# The roads follow the existing Akurana OSM centerlines. Give the mapped
-	# segments a drivable two-way profile, blended shoulders and markings.
+	# Continuous strips share mitered cross-sections at every mapped vertex.
+	# This avoids the triangular grass gaps left by independent segment quads.
 	var pavement := SurfaceTool.new()
 	var shoulders := SurfaceTool.new()
 	var center_lines := SurfaceTool.new()
@@ -192,59 +214,50 @@ func _generate_roads(roads: Array) -> void:
 			continue
 		var width: float = maxf(TWO_WAY_MIN_WIDTH,float(feature[0]))
 		var path: Array = feature[1]
+		if path.size() < 2: continue
 		var progress := 0.0
 		for i in range(path.size()-1):
 			var a := Vector2(float(path[i][0]),float(path[i][1]))
 			var b := Vector2(float(path[i+1][0]),float(path[i+1][1]))
 			var length := a.distance_to(b)
-			if length < 0.1:
-				continue
-			var normal := Vector2(-(b-a).y,(b-a).x).normalized()
-			var parts := maxi(1,ceili(length/2.0))
-			for s in range(parts):
-				var p := a.lerp(b,float(s)/float(parts))
-				var q := a.lerp(b,float(s+1)/float(parts))
-				var half: float = width*0.5
-				var pl := _road_vertex(p,normal,half,ROAD_CLEARANCE)
-				var pr := _road_vertex(p,normal,-half,ROAD_CLEARANCE)
-				var ql := _road_vertex(q,normal,half,ROAD_CLEARANCE)
-				var qr := _road_vertex(q,normal,-half,ROAD_CLEARANCE)
-				_quad(pavement,pl,pr,ql,qr)
-				# Shoulder wings slope back down to local ground. Unlike an elevated
-				# slab, a car can enter the road from either side.
+			if length < 0.1: continue
+			var start_join := _road_join(path,i)
+			var end_join := _road_join(path,i+1)
+			var parts := maxi(1,ceili(length/1.0))
+			for section in range(parts):
+				var t0 := float(section)/float(parts)
+				var t1 := float(section+1)/float(parts)
+				var p := a.lerp(b,t0)
+				var q := a.lerp(b,t1)
+				var pn := start_join.lerp(end_join,t0)
+				var qn := start_join.lerp(end_join,t1)
+				var half: float=width*0.5
+				_quad(pavement,_road_vertex(p,pn,half,ROAD_CLEARANCE),_road_vertex(p,pn,-half,ROAD_CLEARANCE),_road_vertex(q,qn,half,ROAD_CLEARANCE),_road_vertex(q,qn,-half,ROAD_CLEARANCE))
 				for sign in [-1.0,1.0]:
-					var inner_p := _road_vertex(p,normal,sign*half,ROAD_CLEARANCE)
-					var outer_p := _road_vertex(p,normal,sign*(half+SHOULDER_WIDTH),0.01)
-					var inner_q := _road_vertex(q,normal,sign*half,ROAD_CLEARANCE)
-					var outer_q := _road_vertex(q,normal,sign*(half+SHOULDER_WIDTH),0.01)
-					_quad(shoulders,inner_p,outer_p,inner_q,outer_q)
-					var paint_p := _road_vertex(p,normal,sign*(half-0.22),ROAD_CLEARANCE+0.018)
-					var paint_p2 := _road_vertex(p,normal,sign*(half-0.11),ROAD_CLEARANCE+0.018)
-					var paint_q := _road_vertex(q,normal,sign*(half-0.22),ROAD_CLEARANCE+0.018)
-					var paint_q2 := _road_vertex(q,normal,sign*(half-0.11),ROAD_CLEARANCE+0.018)
-					_quad(edge_lines,paint_p,paint_p2,paint_q,paint_q2)
-				# Alternating painted centerline segments separate opposing lanes.
-				if fmod(progress+length*(float(s)+0.5)/float(parts),9.0)<5.0:
-					_quad(center_lines,_road_vertex(p,normal,0.075,ROAD_CLEARANCE+0.022),_road_vertex(p,normal,-0.075,ROAD_CLEARANCE+0.022),_road_vertex(q,normal,0.075,ROAD_CLEARANCE+0.022),_road_vertex(q,normal,-0.075,ROAD_CLEARANCE+0.022))
+					_quad(shoulders,_road_vertex(p,pn,sign*half,ROAD_CLEARANCE),_road_vertex(p,pn,sign*(half+SHOULDER_WIDTH),0.015),_road_vertex(q,qn,sign*half,ROAD_CLEARANCE),_road_vertex(q,qn,sign*(half+SHOULDER_WIDTH),0.015))
+					_quad(edge_lines,_road_vertex(p,pn,sign*(half-0.22),ROAD_CLEARANCE+0.02),_road_vertex(p,pn,sign*(half-0.11),ROAD_CLEARANCE+0.02),_road_vertex(q,qn,sign*(half-0.22),ROAD_CLEARANCE+0.02),_road_vertex(q,qn,sign*(half-0.11),ROAD_CLEARANCE+0.02))
+				var midpoint := progress+length*(t0+t1)*0.5
+				if fmod(midpoint,10.0)<5.0:
+					_quad(center_lines,_road_vertex(p,pn,0.075,ROAD_CLEARANCE+0.023),_road_vertex(p,pn,-0.075,ROAD_CLEARANCE+0.023),_road_vertex(q,qn,0.075,ROAD_CLEARANCE+0.023),_road_vertex(q,qn,-0.075,ROAD_CLEARANCE+0.023))
 				generated+=1
 			progress+=length
 	if generated==0:
 		push_error("Akurana mapped roads contain no usable segments")
 		return
-	var road_mat := G.material("asphalt",Color(0.75,0.75,0.75))
+	var road_mat := G.material("asphalt",Color(0.78,0.78,0.78))
 	road_mat.uv1_triplanar=true
-	road_mat.uv1_scale=Vector3(0.17,0.17,0.17)
+	road_mat.uv1_scale=Vector3(0.15,0.15,0.15)
 	road_mat.cull_mode=BaseMaterial3D.CULL_DISABLED
 	_finish(pavement,road_mat,true)
-	var shoulder_mat := G.material("concrete",Color(0.59,0.57,0.51))
+	var shoulder_mat := G.material("concrete",Color(0.52,0.48,0.41))
 	shoulder_mat.uv1_triplanar=true
-	shoulder_mat.uv1_scale=Vector3(0.25,0.25,0.25)
+	shoulder_mat.uv1_scale=Vector3(0.19,0.19,0.19)
 	shoulder_mat.cull_mode=BaseMaterial3D.CULL_DISABLED
 	_finish(shoulders,shoulder_mat,true)
-	var center_mat := G.material("",Color(0.91,0.73,0.21))
+	var center_mat := G.material("",Color(0.92,0.75,0.25))
 	center_mat.cull_mode=BaseMaterial3D.CULL_DISABLED
 	_finish(center_lines,center_mat,false)
-	var edge_mat := G.material("",Color(0.91,0.91,0.85))
+	var edge_mat := G.material("",Color(0.94,0.93,0.86))
 	edge_mat.cull_mode=BaseMaterial3D.CULL_DISABLED
 	_finish(edge_lines,edge_mat,false)
 
