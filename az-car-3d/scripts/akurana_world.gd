@@ -5,6 +5,10 @@ const G = preload("res://scripts/geometry.gd")
 const DATA = "res://data/akurana/preview.json"
 const GRID_SIZE = 25
 const HALF_SIZE = 640.0
+# Each GIS height sample spans ~53 m. Subdivision is essential: otherwise
+# the physics/visible triangle surface diverges sharply from height_at().
+const TERRAIN_SUBDIVISIONS = 8
+const ROAD_CLEARANCE = 0.65
 var heights: PackedByteArray = PackedByteArray()
 var mapped_roads: Array = []
 
@@ -100,20 +104,24 @@ func _finish(tool: SurfaceTool, material: Material, solid: bool) -> void:
 func _generate_terrain() -> void:
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for z in range(GRID_SIZE - 1):
-		for x in range(GRID_SIZE - 1):
-			var x0 := -HALF_SIZE + float(x) * 2.0 * HALF_SIZE / float(GRID_SIZE - 1)
-			var x1 := -HALF_SIZE + float(x + 1) * 2.0 * HALF_SIZE / float(GRID_SIZE - 1)
-			var z0 := -HALF_SIZE + float(z) * 2.0 * HALF_SIZE / float(GRID_SIZE - 1)
-			var z1 := -HALF_SIZE + float(z + 1) * 2.0 * HALF_SIZE / float(GRID_SIZE - 1)
-			var p00 := Vector3(x0, height_at(x0, z0), z0)
-			var p01 := Vector3(x0, height_at(x0, z1), z1)
-			var p10 := Vector3(x1, height_at(x1, z0), z0)
-			var p11 := Vector3(x1, height_at(x1, z1), z1)
-			_triangle(tool, p00, p01, p10)
-			_triangle(tool, p10, p01, p11)
-	var material := G.material("", Color(0.28, 0.43, 0.22))
-	_finish(tool, material, true)
+	# Tessellate the DEM to follow the same bilinear height function used by
+	# road geometry and building foundations, preventing overhead land sheets.
+	var cells := (GRID_SIZE - 1) * TERRAIN_SUBDIVISIONS
+	var step := (HALF_SIZE * 2.0) / float(cells)
+	for z in range(cells):
+		for x in range(cells):
+			var x0 := -HALF_SIZE + float(x) * step
+			var x1 := x0 + step
+			var z0 := -HALF_SIZE + float(z) * step
+			var z1 := z0 + step
+			var p00 := Vector3(x0,height_at(x0,z0),z0)
+			var p01 := Vector3(x0,height_at(x0,z1),z1)
+			var p10 := Vector3(x1,height_at(x1,z0),z0)
+			var p11 := Vector3(x1,height_at(x1,z1),z1)
+			_triangle(tool,p00,p01,p10)
+			_triangle(tool,p10,p01,p11)
+	var material := G.material("",Color(0.28,0.43,0.22))
+	_finish(tool,material,true)
 
 func _generate_roads(roads: Array) -> void:
 	# Subdivide centerlines so they closely follow the terrain raster.
@@ -131,14 +139,14 @@ func _generate_roads(roads: Array) -> void:
 			if a.distance_to(b) < 0.1:
 				continue
 			var normal := Vector2(-(b - a).normalized().y, (b - a).normalized().x) * width * 0.5
-			var parts := maxi(1, ceili(a.distance_to(b) / 10.0))
+			var parts := maxi(1, ceili(a.distance_to(b) / 3.0))
 			for s in range(parts):
 				var p := a.lerp(b, float(s) / float(parts))
 				var q := a.lerp(b, float(s + 1) / float(parts))
-				var al := Vector3(p.x + normal.x, height_at(p.x + normal.x, p.y + normal.y) + 0.48, p.y + normal.y)
-				var ar := Vector3(p.x - normal.x, height_at(p.x - normal.x, p.y - normal.y) + 0.22, p.y - normal.y)
-				var bl := Vector3(q.x + normal.x, height_at(q.x + normal.x, q.y + normal.y) + 0.22, q.y + normal.y)
-				var br := Vector3(q.x - normal.x, height_at(q.x - normal.x, q.y - normal.y) + 0.22, q.y - normal.y)
+				var al := Vector3(p.x + normal.x, height_at(p.x + normal.x, p.y + normal.y) + ROAD_CLEARANCE, p.y + normal.y)
+				var ar := Vector3(p.x - normal.x, height_at(p.x - normal.x, p.y - normal.y) + ROAD_CLEARANCE, p.y - normal.y)
+				var bl := Vector3(q.x + normal.x, height_at(q.x + normal.x, q.y + normal.y) + ROAD_CLEARANCE, q.y + normal.y)
+				var br := Vector3(q.x - normal.x, height_at(q.x - normal.x, q.y - normal.y) + ROAD_CLEARANCE, q.y - normal.y)
 				_triangle(tool, al, bl, ar)
 				_triangle(tool, bl, br, ar)
 				generated += 1
