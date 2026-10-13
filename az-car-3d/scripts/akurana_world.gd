@@ -8,7 +8,7 @@ const HALF_SIZE = 640.0
 # Each GIS height sample spans ~53 m. Subdivision is essential: otherwise
 # the physics/visible triangle surface diverges sharply from height_at().
 const TERRAIN_SUBDIVISIONS = 8
-const ROAD_CLEARANCE = 0.65
+const ROAD_CLEARANCE = 0.90
 var heights: PackedByteArray = PackedByteArray()
 var mapped_roads: Array = []
 
@@ -55,8 +55,27 @@ func road_spawn_near(point: Vector2 = Vector2(-113.0, 25.0)) -> Dictionary:
 	if not is_finite(best_distance):
 		return {}
 	# A modest lift gives suspension time to settle onto the road collision.
-	return {"position": Vector3(best_point.x, height_at(best_point.x, best_point.y) + 1.65, best_point.y),
+	return {"position": Vector3(best_point.x, road_surface_at(best_point.x, best_point.y) + 1.5, best_point.y),
 		"yaw": best_heading, "distance": best_distance, "road_width": best_width}
+
+func road_surface_at(x: float, z: float) -> float:
+	# Road mesh is lifted over terrain; use the same number for spawn/camera checks.
+	return height_at(x, z) + ROAD_CLEARANCE
+
+func road_distance_at(x: float, z: float) -> float:
+	var probe := Vector2(x,z)
+	var best := INF
+	for feature in mapped_roads:
+		if not feature is Array or feature.size() < 2: continue
+		var path: Array = feature[1]
+		for i in range(path.size() - 1):
+			var a := Vector2(float(path[i][0]),float(path[i][1]))
+			var b := Vector2(float(path[i+1][0]),float(path[i+1][1]))
+			var ab := b-a
+			if ab.length_squared() < 0.01: continue
+			var t := clampf((probe-a).dot(ab)/ab.length_squared(),0.0,1.0)
+			best=minf(best,probe.distance_to(a+ab*t))
+	return best
 
 func height_at(x: float, z: float) -> float:
 	if heights.size() != GRID_SIZE * GRID_SIZE:
@@ -121,6 +140,7 @@ func _generate_terrain() -> void:
 			_triangle(tool,p00,p01,p10)
 			_triangle(tool,p10,p01,p11)
 	var material := G.material("",Color(0.28,0.43,0.22))
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_finish(tool,material,true)
 
 func _generate_roads(roads: Array) -> void:
@@ -151,7 +171,8 @@ func _generate_roads(roads: Array) -> void:
 				_triangle(tool, bl, br, ar)
 				generated += 1
 	if generated > 0:
-		var road_mat := G.material("", Color(0.19, 0.20, 0.22)) # Clearly distinguish paved roads from grass.
+		var road_mat := G.material("", Color(0.12, 0.13, 0.15)) # High contrast dark asphalt.
+		road_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 		_finish(tool, road_mat, true)
 
 func _generate_buildings(buildings: Array) -> void:
