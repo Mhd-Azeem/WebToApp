@@ -42,6 +42,54 @@ func _ready() -> void:
 		_generate_vegetation()
 		_generate_roadside()
 		_flush_batches()
+	# Photo-inspired Akurana market detailing is intentionally generated after
+	# either baked or source map loading, so it appears in APK and Windows exports.
+	_generate_town_street_details()
+
+func _generate_town_street_details() -> void:
+	# Approximate the supplied town photo: storefront awnings and fascia
+	# on real OSM-derived footprints. Shop names are generic, not GIS facts.
+	var canopy_mat:=G.material("",Color(.20,.27,.31))
+	var accent_mats: Array[Material]=[
+		G.material("",Color(.51,.13,.15)),
+		G.material("",Color(.13,.34,.34)),
+		G.material("",Color(.23,.32,.48)),
+		G.material("",Color(.41,.28,.17))
+	]
+	var fascia:=G.material("",Color(.09,.105,.12))
+	var pavement_mat:=G.material("concrete",Color(.54,.53,.49))
+	var placed:=0
+	for feature in mapped_buildings:
+		if placed>=64: break
+		if not bool(feature.get("shopfront_inferred",false)): continue
+		var footprint: Array=feature.get("footprint",[])
+		if footprint.size()<3: continue
+		var center:=Vector2.ZERO
+		for pt in footprint: center+=_v2(pt)
+		center/=float(footprint.size())
+		if center.distance_to(Vector2(-113,-25))>200: continue
+		var edge_index:=posmod(int(feature.get("frontage",0)),footprint.size())
+		var a:=_v2(footprint[edge_index])
+		var b:=_v2(footprint[(edge_index+1)%footprint.size()])
+		var edge:=b-a
+		var length:=edge.length()
+		if length<3.2 or length>27: continue
+		var midpoint: Vector2=(a+b)*.5
+		if road_distance_at(midpoint.x,midpoint.y)>26: continue
+		var outward:=Vector2(-edge.y,edge.x).normalized()
+		if Geometry2D.is_point_in_polygon(midpoint+outward*.35,PackedVector2Array(footprint.map(func(v): return _v2(v)))):
+			outward=-outward
+		var world_floor: float=height_at(midpoint.x,midpoint.y)
+		var forward:=Vector3(outward.x,0,outward.y)
+		var basis:=Basis(Vector3.UP,-atan2(edge.y,edge.x))
+		var awning_position:=Vector3(midpoint.x,world_floor+2.75,midpoint.y)+forward*.65
+		_batch("market_awning",awning_position,Vector3(length*.82,.10,1.40),accent_mats[placed%accent_mats.size()],basis)
+		_batch("market_fascia",Vector3(midpoint.x,world_floor+3.15,midpoint.y)+forward*.13,Vector3(length*.78,.48,.12),fascia,basis)
+		_batch("market_trim",Vector3(midpoint.x,world_floor+3.49,midpoint.y)+forward*.16,Vector3(length*.80,.07,.16),accent_mats[placed%accent_mats.size()],basis)
+		# Narrow shopfront paving; visually connects the frontage with ground.
+		_batch("market_paving",Vector3(midpoint.x,world_floor+.09,midpoint.y)+forward*.40,Vector3(length*.86,.12,.9),pavement_mat,basis)
+		placed+=1
+	_flush_batches()
 
 func height_at(x: float,z: float) -> float:
 	if heights.size()!=321*321: return 20.0
