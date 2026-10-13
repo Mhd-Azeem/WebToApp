@@ -28,10 +28,13 @@ func _process(delta: float) -> void:
 	if location.y < floor_y:
 		location.y = floor_y
 		camera.global_position = location
-	# Always aim approximately horizontally in Akurana: the standard Colombo
-	# camera targets would pitch through steep slopes even above ground.
-	var forward := car.global_basis.z
-	camera.look_at(location + Vector3(forward.x*25.0,0.5,forward.z*25.0),Vector3.UP)
+	# Driver and hood views follow the chassis pitch/roll across hill slopes.
+	# Do not flatten the camera using a world-horizontal forward/up vector.
+	# Chase camera retains the parent scene's collision-aware look-at target.
+	if camera_mode == 1 or camera_mode == 2:
+		var forward: Vector3 = car.global_basis.z.normalized()
+		var up: Vector3 = car.global_basis.y.normalized()
+		camera.look_at(camera.global_position + forward * 25.0, up)
 	camera.near = 0.08
 
 func _physics_process(delta: float) -> void:
