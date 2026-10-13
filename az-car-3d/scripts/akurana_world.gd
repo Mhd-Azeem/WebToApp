@@ -8,7 +8,7 @@ const HALF_SIZE = 640.0
 # Each GIS height sample spans ~53 m. Subdivision is essential: otherwise
 # the physics/visible triangle surface diverges sharply from height_at().
 const TERRAIN_SUBDIVISIONS = 8
-const ROAD_CLEARANCE = 0.28
+const ROAD_CLEARANCE = 0.65
 var heights: PackedByteArray = PackedByteArray()
 var mapped_roads: Array = []
 var terrain_texture: ImageTexture
