@@ -1,285 +1,452 @@
 extends Node3D
-## Akurana early-access GIS preview. Coordinates were clipped/projected from OSM,
-## heights sampled from Copernicus GLO-30 DSM. Do not use for navigation.
+## OSM-derived polygons; heights/facades/vegetation without tags are inferred.
 const G = preload("res://scripts/geometry.gd")
-const DATA = "res://data/akurana/preview.json"
-const GRID_SIZE = 25
-const HALF_SIZE = 640.0
-# Each GIS height sample spans ~53 m. Subdivision is essential: otherwise
-# the physics/visible triangle surface diverges sharply from height_at().
-const TERRAIN_SUBDIVISIONS = 12
+const DATA = "res://data/akurana/world.json"
 const ROAD_CLEARANCE = 0.13
-const TWO_WAY_MIN_WIDTH = 6.8
-const SHOULDER_WIDTH = 1.6
-var heights: PackedByteArray = PackedByteArray()
+var heights: Array = []
 var mapped_roads: Array = []
-var terrain_texture: ImageTexture
+var mapped_buildings: Array = []
+var data: Dictionary = {}
+var vegetation: Array[MultiMeshInstance3D] = []
+var render_meshes: Array[GeometryInstance3D] = []
+var terrain_count := 0
+var building_count := 0
+var batches := {}
+var plant_cell:=Vector2i.ZERO
 
 func _ready() -> void:
-	var raw := FileAccess.get_file_as_string(DATA)
-	var parsed = JSON.parse_string(raw)
-	if not parsed is Dictionary:
-		push_error("Akurana map data missing or invalid")
+	var runtime_data:=DATA if OS.get_cmdline_user_args().has("--bake-world") else "res://data/akurana/world-runtime.json"
+	var parsed = JSON.parse_string(FileAccess.get_file_as_string(runtime_data))
+	if not parsed is Dictionary or parsed.get("schema",0)!=2:
+		push_error("Akurana processed map missing")
 		return
-	heights = Marshalls.base64_to_raw(str(parsed.get("grid", "")))
-	if heights.size() != GRID_SIZE * GRID_SIZE:
-		push_error("Invalid Akurana height grid")
-		return
-	_generate_terrain()
-	mapped_roads = parsed.get("roads", [])
-	_generate_roads(mapped_roads)
-	_generate_buildings(parsed.get("buildings", []))
-	G.label(self, "AKURANA - SRI LANKA", Vector3(-150, 37, 40), 24)
+	data=parsed
+	heights=data.height_field
+	mapped_roads=data.roads
+	mapped_buildings=data.buildings
+	if ResourceLoader.exists("res://data/akurana/environment.scn") and not OS.get_cmdline_user_args().has("--bake-world"):
+		var baked: Node3D=load("res://data/akurana/environment.scn").instantiate()
+		add_child(baked)
+		for item in baked.find_children("*","GeometryInstance3D",true,false):
+			render_meshes.append(item)
+			if item is MultiMeshInstance3D and item.has_meta("vegetation"): vegetation.append(item)
+		terrain_count=int(baked.get_meta("terrain_count",0))
+		building_count=int(baked.get_meta("building_count",0))
+	else:
+		if not OS.get_cmdline_user_args().has("--bake-world"):
+			push_error("Akurana baked environment missing; rebuild assets before exporting")
+			return
+		_generate_terrain()
+		_generate_roads()
+		_generate_buildings()
+		_generate_vegetation()
+		_generate_roadside()
+		_flush_batches()
 
+func height_at(x: float,z: float) -> float:
+	if heights.size()!=321*321: return 20.0
+	var u:=clampf((x+640.0)/4.0,0,320)
+	var v:=clampf((z+640.0)/4.0,0,320)
+	var ix:=mini(floori(u),319)
+	var iz:=mini(floori(v),319)
+	var fx:=u-ix
+	var fz:=v-iz
+	var a:=float(heights[iz*321+ix])
+	var b:=float(heights[iz*321+ix+1])
+	var c:=float(heights[(iz+1)*321+ix])
+	var d:=float(heights[(iz+1)*321+ix+1])
+	# Exact same diagonal as the terrain collision, not a bilinear approximation.
+	return a+(b-a)*fx+(c-a)*fz if fx+fz<=1 else d+(c-d)*(1-fx)+(b-d)*(1-fz)
 
-func road_spawn_near(point: Vector2 = Vector2(-113.0, 25.0)) -> Dictionary:
-	# Project onto the nearest mapped road segment instead of spawning in a field.
-	var best_distance := INF
-	var best_point := Vector2.ZERO
-	var best_heading := 0.0
-	var best_width := 0.0
-	for feature in mapped_roads:
-		if not feature is Array or feature.size() < 2: continue
-		var width := maxf(TWO_WAY_MIN_WIDTH,float(feature[0]))
-		var path: Array = feature[1]
-		for i in range(path.size() - 1):
-			var a := Vector2(float(path[i][0]),float(path[i][1]))
-			var b := Vector2(float(path[i + 1][0]),float(path[i + 1][1]))
-			var ab := b - a
-			if ab.length_squared() < 1.0: continue
-			var fraction := clampf((point - a).dot(ab) / ab.length_squared(), 0.0, 1.0)
-			var nearest := a + ab * fraction
-			var distance := nearest.distance_to(point)
-			if distance < best_distance:
-				best_distance = distance
-				best_point = nearest
-				best_heading = atan2(ab.x, ab.y)
-				best_width = width
-	if not is_finite(best_distance):
-		return {}
-	# A modest lift gives suspension time to settle onto the road collision.
-	return {"position": Vector3(best_point.x, road_surface_at(best_point.x, best_point.y) + 1.5, best_point.y),
-		"yaw": best_heading, "distance": best_distance, "road_width": best_width}
+func road_surface_at(x: float,z: float) -> float:
+	return height_at(x,z)+ROAD_CLEARANCE
 
-func road_surface_at(x: float, z: float) -> float:
-	# Road mesh is lifted over terrain; use the same number for spawn/camera checks.
-	return height_at(x, z) + ROAD_CLEARANCE
-
-func road_distance_at(x: float, z: float) -> float:
-	var probe := Vector2(x,z)
-	var best := INF
-	for feature in mapped_roads:
-		if not feature is Array or feature.size() < 2: continue
-		var path: Array = feature[1]
-		for i in range(path.size() - 1):
-			var a := Vector2(float(path[i][0]),float(path[i][1]))
-			var b := Vector2(float(path[i+1][0]),float(path[i+1][1]))
-			var ab := b-a
-			if ab.length_squared() < 0.01: continue
-			var t := clampf((probe-a).dot(ab)/ab.length_squared(),0.0,1.0)
-			best=minf(best,probe.distance_to(a+ab*t))
+func road_distance_at(x: float,z: float) -> float:
+	var best:=INF
+	var point:=Vector2(x,z)
+	for road in mapped_roads:
+		var path: Array=road.path
+		for i in range(path.size()-1):
+			best=minf(best,point.distance_to(Geometry2D.get_closest_point_to_segment(point,_v2(path[i]),_v2(path[i+1]))))
 	return best
 
-func height_at(x: float, z: float) -> float:
-	if heights.size() != GRID_SIZE * GRID_SIZE:
-		return 20.0
-	var u := clampf((x + HALF_SIZE) / (HALF_SIZE * 2.0) * float(GRID_SIZE - 1), 0.0, float(GRID_SIZE - 1))
-	var v := clampf((z + HALF_SIZE) / (HALF_SIZE * 2.0) * float(GRID_SIZE - 1), 0.0, float(GRID_SIZE - 1))
-	var ix := mini(int(floor(u)), GRID_SIZE - 2)
-	var iz := mini(int(floor(v)), GRID_SIZE - 2)
-	var fx := u - float(ix)
-	var fz := v - float(iz)
-	var a := lerpf(float(heights[iz * GRID_SIZE + ix]), float(heights[iz * GRID_SIZE + ix + 1]), fx)
-	var b := lerpf(float(heights[(iz + 1) * GRID_SIZE + ix]), float(heights[(iz + 1) * GRID_SIZE + ix + 1]), fx)
-	return lerpf(a, b, fz)
+func road_spawn_near(point: Vector2=Vector2(-113,-25)) -> Dictionary:
+	var best:=INF
+	var result: Dictionary={}
+	for road in mapped_roads:
+		var path: Array=road.path
+		for i in range(path.size()-1):
+			var a:=_v2(path[i])
+			var b:=_v2(path[i+1])
+			if a.distance_to(b)<0.1: continue
+			var p:=Geometry2D.get_closest_point_to_segment(point,a,b)
+			var distance:=point.distance_to(p)
+			if distance<best:
+				best=distance
+				var direction: Vector2=(b-a).normalized()
+				if str(road.oneway)=="-1": direction=-direction
+				# In right-handed X-east/Z-south axes, this is the left travel lane.
+				if float(road.width)>=5.5: p+=Vector2(direction.y,-direction.x)*float(road.width)*0.24
+				result={"position":Vector3(p.x,road_surface_at(p.x,p.y)+1.5,p.y),"yaw":atan2(direction.x,direction.y),"distance":distance,"road_width":road.width}
+	return result
 
-func _triangle(tool: SurfaceTool, a: Vector3, b: Vector3, c: Vector3) -> void:
-	tool.add_vertex(a)
-	tool.add_vertex(b)
-	tool.add_vertex(c)
+func _v2(p: Array) -> Vector2:
+	return Vector2(float(p[0]),float(p[1]))
 
-func _finish(tool: SurfaceTool, material: Material, solid: bool) -> void:
-	tool.generate_normals()
-	var mesh: ArrayMesh = tool.commit()
-	if mesh == null:
-		return
-	var instance := MeshInstance3D.new()
-	instance.mesh = mesh
-	instance.material_override = material
-	add_child(instance)
-	if solid:
-		var body := StaticBody3D.new()
-		body.name = "TerrainOrRoadCollision"
-		var shape := CollisionShape3D.new()
-		# Collision is intentionally two-sided: the 30 m DSM terrain mesh is a
-		# thin surface, and raycast vehicle wheels must hit it from above.
-		var collision_mesh := mesh.create_trimesh_shape()
-		collision_mesh.backface_collision = true
-		shape.shape = collision_mesh
-		body.collision_layer = 1
-		body.collision_mask = 1
-		body.add_child(shape)
-		# Keep physics geometry directly in the world tree and independent of
-		# the render mesh's visibility distance/LOD.
-		add_child(body)
+func _vertex(p: Vector2,rise:=0.0) -> Vector3:
+	return Vector3(p.x,height_at(p.x,p.y)+rise,p.y)
 
-func _grass_material() -> StandardMaterial3D:
-	# Small deterministic tile texture adds vegetation/soil variation without
-	# requiring downloads. Keep mobile RAM/draw overhead modest.
-	var noise := FastNoiseLite.new()
-	noise.seed = 27419
-	noise.frequency = 0.055
-	noise.fractal_octaves = 3
-	var img := Image.create(128,128,false,Image.FORMAT_RGB8)
-	for z in range(128):
-		for x in range(128):
-			var n := noise.get_noise_2d(float(x),float(z))
-			var d := noise.get_noise_2d(float(x+500),float(z+500))
-			var grass := Color(0.30,0.43,0.23).lerp(Color(0.49,0.55,0.29),clampf(0.48+n*0.85,0.0,1.0))
-			grass = grass.lerp(Color(0.40,0.35,0.25),clampf((d-0.28)*0.65,0.0,0.23))
-			img.set_pixel(x,z,grass)
-	terrain_texture = ImageTexture.create_from_image(img)
-	var mat := StandardMaterial3D.new()
-	mat.albedo_texture = terrain_texture
-	mat.roughness = 1.0
-	mat.uv1_triplanar = true
-	mat.uv1_scale = Vector3(0.11,0.11,0.11)
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	return mat
-
-func _generate_terrain() -> void:
-	var tool := SurfaceTool.new()
+func _tool() -> SurfaceTool:
+	var tool:=SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	# Tessellate the DEM to follow the same bilinear height function used by
-	# road geometry and building foundations, preventing overhead land sheets.
-	var cells := (GRID_SIZE - 1) * TERRAIN_SUBDIVISIONS
-	var step := (HALF_SIZE * 2.0) / float(cells)
-	for z in range(cells):
-		for x in range(cells):
-			var x0 := -HALF_SIZE + float(x) * step
-			var x1 := x0 + step
-			var z0 := -HALF_SIZE + float(z) * step
-			var z1 := z0 + step
-			var p00 := Vector3(x0,height_at(x0,z0),z0)
-			var p01 := Vector3(x0,height_at(x0,z1),z1)
-			var p10 := Vector3(x1,height_at(x1,z0),z0)
-			var p11 := Vector3(x1,height_at(x1,z1),z1)
-			_triangle(tool,p00,p01,p10)
-			_triangle(tool,p10,p01,p11)
-	var material := _grass_material()
-	_finish(tool,material,true)
+	return tool
 
-func _road_vertex(point: Vector2, normal: Vector2, lateral: float, rise: float) -> Vector3:
-	var offset := point + normal * lateral
-	return Vector3(offset.x, height_at(offset.x,offset.y) + rise, offset.y)
+func _triangle(tool: SurfaceTool,a: Vector3,b: Vector3,c: Vector3) -> void:
+	for p in [a,b,c]:
+		tool.set_uv(Vector2(p.x,p.z)*0.25)
+		tool.add_vertex(p)
 
-func _quad(tool: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3) -> void:
+func _quad(tool: SurfaceTool,a: Vector3,b: Vector3,c: Vector3,d: Vector3) -> void:
 	_triangle(tool,a,b,c)
 	_triangle(tool,c,b,d)
 
-func _road_join(path: Array, index: int) -> Vector2:
-	# Shared miter at polyline vertices. Unlike per-segment perpendiculars,
-	# both neighboring road pieces now use exactly the same edge coordinates.
-	var point := Vector2(float(path[index][0]),float(path[index][1]))
-	var before := point
-	var after := point
-	if index > 0:
-		before = Vector2(float(path[index-1][0]),float(path[index-1][1]))
-	if index+1 < path.size():
-		after = Vector2(float(path[index+1][0]),float(path[index+1][1]))
-	var incoming := (point-before).normalized()
-	var outgoing := (after-point).normalized()
-	if incoming.length_squared() < 0.01: incoming=outgoing
-	if outgoing.length_squared() < 0.01: outgoing=incoming
-	var forward := (incoming+outgoing).normalized()
-	if forward.length_squared() < 0.01: forward=outgoing
-	var perpendicular := Vector2(-forward.y,forward.x)
-	var side := Vector2(-outgoing.y,outgoing.x)
-	# Restrict long spikes at extremely sharp bends.
-	var denominator := maxf(0.55,absf(perpendicular.dot(side)))
-	return perpendicular / denominator
+func _convex(points: PackedVector2Array) -> bool:
+	var direction:=0.0
+	for i in range(points.size()):
+		var turn: float=(points[(i+1)%points.size()]-points[i]).cross(points[(i+2)%points.size()]-points[(i+1)%points.size()])
+		if absf(turn)<.001: continue
+		if direction!=0 and signf(turn)!=direction: return false
+		direction=signf(turn)
+	return true
 
-func _generate_roads(roads: Array) -> void:
-	# Continuous strips share mitered cross-sections at every mapped vertex.
-	# This avoids the triangular grass gaps left by independent segment quads.
-	var pavement := SurfaceTool.new()
-	var shoulders := SurfaceTool.new()
-	var center_lines := SurfaceTool.new()
-	var edge_lines := SurfaceTool.new()
-	for tool in [pavement,shoulders,center_lines,edge_lines]:
-		tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var generated := 0
-	for feature in roads:
-		if not feature is Array or feature.size() < 2:
-			continue
-		var width: float = maxf(TWO_WAY_MIN_WIDTH,float(feature[0]))
-		var path: Array = feature[1]
-		if path.size() < 2: continue
-		var progress := 0.0
-		for i in range(path.size()-1):
-			var a := Vector2(float(path[i][0]),float(path[i][1]))
-			var b := Vector2(float(path[i+1][0]),float(path[i+1][1]))
-			var length := a.distance_to(b)
-			if length < 0.1: continue
-			var start_join := _road_join(path,i)
-			var end_join := _road_join(path,i+1)
-			var parts := maxi(1,ceili(length/1.0))
-			for section in range(parts):
-				var t0 := float(section)/float(parts)
-				var t1 := float(section+1)/float(parts)
-				var p := a.lerp(b,t0)
-				var q := a.lerp(b,t1)
-				var pn := start_join.lerp(end_join,t0)
-				var qn := start_join.lerp(end_join,t1)
-				var half: float=width*0.5
-				_quad(pavement,_road_vertex(p,pn,half,ROAD_CLEARANCE),_road_vertex(p,pn,-half,ROAD_CLEARANCE),_road_vertex(q,qn,half,ROAD_CLEARANCE),_road_vertex(q,qn,-half,ROAD_CLEARANCE))
-				for sign in [-1.0,1.0]:
-					_quad(shoulders,_road_vertex(p,pn,sign*half,ROAD_CLEARANCE),_road_vertex(p,pn,sign*(half+SHOULDER_WIDTH),0.015),_road_vertex(q,qn,sign*half,ROAD_CLEARANCE),_road_vertex(q,qn,sign*(half+SHOULDER_WIDTH),0.015))
-					_quad(edge_lines,_road_vertex(p,pn,sign*(half-0.22),ROAD_CLEARANCE+0.02),_road_vertex(p,pn,sign*(half-0.11),ROAD_CLEARANCE+0.02),_road_vertex(q,qn,sign*(half-0.22),ROAD_CLEARANCE+0.02),_road_vertex(q,qn,sign*(half-0.11),ROAD_CLEARANCE+0.02))
-				var midpoint := progress+length*(t0+t1)*0.5
-				if fmod(midpoint,10.0)<5.0:
-					_quad(center_lines,_road_vertex(p,pn,0.075,ROAD_CLEARANCE+0.023),_road_vertex(p,pn,-0.075,ROAD_CLEARANCE+0.023),_road_vertex(q,qn,0.075,ROAD_CLEARANCE+0.023),_road_vertex(q,qn,-0.075,ROAD_CLEARANCE+0.023))
-				generated+=1
-			progress+=length
-	if generated==0:
-		push_error("Akurana mapped roads contain no usable segments")
-		return
-	var road_mat := G.material("asphalt",Color(0.78,0.78,0.78))
-	road_mat.uv1_triplanar=true
-	road_mat.uv1_scale=Vector3(0.15,0.15,0.15)
-	road_mat.cull_mode=BaseMaterial3D.CULL_DISABLED
-	_finish(pavement,road_mat,true)
-	var shoulder_mat := G.material("concrete",Color(0.52,0.48,0.41))
-	shoulder_mat.uv1_triplanar=true
-	shoulder_mat.uv1_scale=Vector3(0.19,0.19,0.19)
-	shoulder_mat.cull_mode=BaseMaterial3D.CULL_DISABLED
-	_finish(shoulders,shoulder_mat,true)
-	var center_mat := G.material("",Color(0.92,0.75,0.25))
-	center_mat.cull_mode=BaseMaterial3D.CULL_DISABLED
-	_finish(center_lines,center_mat,false)
-	var edge_mat := G.material("",Color(0.94,0.93,0.86))
-	edge_mat.cull_mode=BaseMaterial3D.CULL_DISABLED
-	_finish(edge_lines,edge_mat,false)
+func _finish(tool: SurfaceTool,mat: Material,solid: bool,kind: String) -> MeshInstance3D:
+	tool.generate_normals()
+	if mat is ShaderMaterial or (mat is StandardMaterial3D and mat.normal_enabled): tool.generate_tangents()
+	tool.index()
+	var mesh:=tool.commit()
+	if mesh==null: return null
+	var instance:=MeshInstance3D.new()
+	instance.name=kind
+	# Real tile-local origins make distance culling and LOD operate locally.
+	var center:=mesh.get_aabb().get_center()
+	var local_tool:=_tool()
+	local_tool.append_from(mesh,0,Transform3D(Basis.IDENTITY,-center))
+	local_tool.index()
+	instance.mesh=local_tool.commit()
+	instance.position=center
+	instance.material_override=mat
+	instance.visibility_range_end=600
+	if kind in ["Terrain","Road","Shoulder","Marking"]: instance.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(instance,true)
+	render_meshes.append(instance)
+	if solid:
+		var body:=StaticBody3D.new()
+		body.name=kind+"Collision"
+		var shape:=CollisionShape3D.new()
+		var collision:=mesh.create_trimesh_shape()
+		collision.backface_collision=true
+		shape.shape=collision
+		body.add_child(shape)
+		add_child(body,true)
+	return instance
 
-func _generate_buildings(buildings: Array) -> void:
-	var wall_mats := [
-		G.material("plaster", Color(0.84, 0.77, 0.66)),
-		G.material("concrete", Color(0.65, 0.71, 0.67)),
-		G.material("facade0", Color(0.92, 0.86, 0.72))
-	]
-	for i in range(buildings.size()):
-		var b: Array = buildings[i]
-		if b.size() != 4:
+func _generate_terrain() -> void:
+	var mat:=ShaderMaterial.new()
+	mat.shader=load("res://assets/akurana_ground.gdshader")
+	mat.set_shader_parameter("grass_texture",load("res://assets/textures/akurana_grass.jpg"))
+	mat.set_shader_parameter("soil_texture",load("res://assets/textures/akurana_soil.jpg"))
+	mat.set_shader_parameter("ground_normal",load("res://assets/textures/akurana_ground_normal.jpg"))
+	for z in range(-640,640,64):
+		for x in range(-640,640,64):
+			var tool:=_tool()
+			for dz in range(0,64,4):
+				for dx in range(0,64,4):
+					var p:=Vector2(x+dx,z+dz)
+					_quad(tool,_vertex(p),_vertex(p+Vector2(4,0)),_vertex(p+Vector2(0,4)),_vertex(p+Vector2(4,4)))
+			_finish(tool,mat,true,"Terrain")
+			terrain_count+=1
+
+func _generate_roads() -> void:
+	var asphalt:=G.material("asphalt",Color(.72,.72,.70)).duplicate() as StandardMaterial3D
+	asphalt.resource_name="AkuranaAsphalt"
+	asphalt.roughness=.92
+	asphalt.normal_enabled=true
+	asphalt.normal_texture=load("res://assets/textures/asphalt_normal.jpg")
+	asphalt.normal_scale=.35
+	asphalt.roughness_texture=load("res://assets/textures/asphalt_roughness.jpg")
+	asphalt.roughness_texture_channel=BaseMaterial3D.TEXTURE_CHANNEL_RED
+	asphalt.texture_filter=BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	var gravel:=G.material("concrete",Color(.47,.40,.29))
+	var paint:=G.material("",Color(.84,.82,.71))
+	for tile in data.tiles:
+		for kind in ["road","shoulder","marking"]:
+			var points: Array=tile[kind]
+			if points.is_empty(): continue
+			var tool:=_tool()
+			for i in range(0,points.size(),3):
+				var a:=_v2(points[i])
+				var b:=_v2(points[i+1])
+				var c:=_v2(points[i+2])
+				if (b-a).cross(c-a)<0:
+					var swap:=b
+					b=c
+					c=swap
+				var rise:=ROAD_CLEARANCE if kind=="road" else .15
+				if kind=="shoulder":
+					var raw_a: Array=points[i]
+					var raw_b: Array=points[i+1]
+					var raw_c: Array=points[i+2]
+					# Recover corresponding taper heights after any winding swap.
+					var rb:=float(raw_b[2]) if b==_v2(raw_b) else float(raw_c[2])
+					var rc:=float(raw_c[2]) if c==_v2(raw_c) else float(raw_b[2])
+					_triangle(tool,_vertex(a,float(raw_a[2])),_vertex(b,rb),_vertex(c,rc))
+				else: _triangle(tool,_vertex(a,rise),_vertex(b,rise),_vertex(c,rise))
+			_finish(tool,asphalt if kind=="road" else (paint if kind=="marking" else gravel),kind!="marking",kind.capitalize())
+
+func _generate_buildings() -> void:
+	var materials: Array[Material]=[G.material("plaster",Color(.81,.77,.66)),G.material("plaster",Color(.72,.78,.76)),G.material("plaster",Color(.88,.83,.71)),G.material("concrete",Color(.70,.67,.63))]
+	for mat in materials:
+		mat.uv1_triplanar=true
+		mat.uv1_scale=Vector3(.25,.25,.25)
+	var concrete:=G.material("concrete",Color(.56,.56,.53))
+	concrete.uv1_triplanar=true
+	concrete.uv1_scale=Vector3(.25,.25,.25)
+	var roof:=G.material("tiles",Color(.49,.29,.20))
+	var glass:=G.material("",Color(.16,.25,.28))
+	glass.roughness=.22
+	glass.metallic=.25
+	var trim:=G.material("",Color(.68,.66,.58))
+	var door_mat:=G.material("",Color(.27,.23,.18))
+	var shutter:=G.material("",Color(.30,.37,.39))
+	for feature in mapped_buildings:
+		if not feature.holes.is_empty(): continue
+		var polygon:=PackedVector2Array()
+		var floor_y:=-INF
+		var low_y:=INF
+		for coord in feature.footprint:
+			var p:=_v2(coord)
+			polygon.append(p)
+			floor_y=maxf(floor_y,height_at(p.x,p.y))
+			low_y=minf(low_y,height_at(p.x,p.y))
+		var frontage_index:=int(feature.frontage)
+		if Geometry2D.is_polygon_clockwise(polygon):
+			polygon.reverse()
+			frontage_index=posmod(polygon.size()-2-frontage_index,polygon.size())
+		# Check entire perimeter and interior at collision-grid resolution.
+		for edge_index in range(polygon.size()):
+			var a:=polygon[edge_index]
+			var b:=polygon[(edge_index+1)%polygon.size()]
+			# Exact breakpoints of the piecewise-linear collision field. Maxima
+			# can occur where a footprint edge crosses a cell/diagonal boundary.
+			for axis in [Vector2(1,0),Vector2(0,1),Vector2(1,1)]:
+				var start_value: float=a.dot(axis)
+				var end_value: float=b.dot(axis)
+				if absf(end_value-start_value)<.0001: continue
+				for crossing in range(ceili(minf(start_value,end_value)/4.),floori(maxf(start_value,end_value)/4.)+1):
+					var fraction: float=(float(crossing)*4.-start_value)/(end_value-start_value)
+					var p:=a.lerp(b,clampf(fraction,0,1))
+					floor_y=maxf(floor_y,height_at(p.x,p.y))
+					low_y=minf(low_y,height_at(p.x,p.y))
+		var bounds:=Rect2(polygon[0],Vector2.ZERO)
+		for p in polygon: bounds=bounds.expand(p)
+		for x in range(floori(bounds.position.x/4.)*4,ceili(bounds.end.x),4):
+			for z in range(floori(bounds.position.y/4.)*4,ceili(bounds.end.y),4):
+				if Geometry2D.is_point_in_polygon(Vector2(x,z),polygon):
+					floor_y=maxf(floor_y,height_at(x,z))
+					low_y=minf(low_y,height_at(x,z))
+		if floor_y-low_y>5.0: continue
+		floor_y+=.12
+		var height:=float(feature.height)
+		var indices:=Geometry2D.triangulate_polygon(polygon)
+		if indices.is_empty(): continue
+		var walls:=_tool()
+		var foundation:=_tool()
+		var roof_tool:=_tool()
+		for i in range(polygon.size()):
+			var a:=polygon[i]
+			var b:=polygon[(i+1)%polygon.size()]
+			_quad(walls,Vector3(a.x,floor_y,a.y),Vector3(b.x,floor_y,b.y),Vector3(a.x,floor_y+height,a.y),Vector3(b.x,floor_y+height,b.y))
+			_quad(foundation,Vector3(a.x,low_y-.3,a.y),Vector3(b.x,low_y-.3,b.y),Vector3(a.x,floor_y,a.y),Vector3(b.x,floor_y,b.y))
+			var edge:=b-a
+			var inward:=Vector2(-edge.y,edge.x).normalized()
+			if not Geometry2D.is_point_in_polygon((a+b)*.5+inward*.1,polygon): inward=-inward
+			for level in range(int(feature.levels)):
+				var count:=maxi(1,int(edge.length()/3.0))
+				for slot in range(count):
+					var p:=a.lerp(b,(float(slot)+.5)/float(count))-inward*.06
+					var basis:=Basis(Vector3.UP,-atan2(edge.y,edge.x))
+					var size:=Vector3(minf(1.15,edge.length()*.5),1.2,.08)
+					var position:=Vector3(p.x,floor_y+float(level)*3+1.6,p.y)
+					if level==0 and i==frontage_index:
+						size.y=2.2
+						position.y=floor_y+1.1
+						_batch("door",position,size,shutter if feature.shopfront_inferred else door_mat,basis)
+					else:
+						_batch("window",position,size,glass,basis)
+						for sign in [-1.,1.]:
+							_batch("frame",position+basis.x*sign*(size.x*.5+.04),Vector3(.075,size.y+.15,.1),trim,basis)
+							_batch("frame",position+Vector3(0,sign*(size.y*.5+.04),0),Vector3(size.x,.075,.1),trim,basis)
+			if i==frontage_index and feature.shopfront_inferred and edge.length()>5:
+				var p: Vector2=(a+b)*.5-inward*.1
+				_batch("shop_sign",Vector3(p.x,floor_y+2.7,p.y),Vector3(minf(edge.length()*.8,5.),.48,.1),G.material("",Color(.20,.35,.38)),Basis(Vector3.UP,-atan2(edge.y,edge.x)))
+		for i in range(0,indices.size(),3):
+			var a:=polygon[indices[i]]
+			var b:=polygon[indices[i+1]]
+			var c:=polygon[indices[i+2]]
+			if polygon.size()==4 and _convex(polygon):
+				# Hipped treatment remains within the exact outline, without overhang.
+				var center:=Vector2.ZERO
+				for corner in polygon: center+=corner
+				center/=float(polygon.size())
+				if Geometry2D.is_point_in_polygon(center,polygon):
+					# Build once below instead of overlapping flat triangles.
+					if i==0:
+						for edge_index in range(polygon.size()):
+							var ra:=polygon[edge_index]
+							var rb:=polygon[(edge_index+1)%polygon.size()]
+							if (rb-ra).cross(center-ra)<0:
+								var swap:=rb
+								rb=ra
+								ra=swap
+							_triangle(roof_tool,Vector3(ra.x,floor_y+height,ra.y),Vector3(rb.x,floor_y+height,rb.y),Vector3(center.x,floor_y+height+1.1,center.y))
+				else: _triangle(roof_tool,Vector3(a.x,floor_y+height,a.y),Vector3(b.x,floor_y+height,b.y),Vector3(c.x,floor_y+height,c.y))
+			else: _triangle(roof_tool,Vector3(a.x,floor_y+height,a.y),Vector3(b.x,floor_y+height,b.y),Vector3(c.x,floor_y+height,c.y))
+		var wall:=_finish(walls,materials[int(feature.id)%materials.size()],true,"Building")
+		wall.set_meta("osm_id",feature.id)
+		wall.set_meta("height_inferred",feature.height_inferred)
+		_finish(foundation,concrete,true,"Foundation")
+		_finish(roof_tool,roof,true,"Roof")
+		building_count+=1
+
+func _batch(kind: String,pos: Vector3,size: Vector3,mat: Material,basis:=Basis.IDENTITY) -> void:
+	var cell:=plant_cell if kind.begins_with("plant_") else Vector2i(floori(pos.x/128),floori(pos.z/128))
+	var key:="%s:%d:%d:%d" % [kind,cell.x,cell.y,mat.get_instance_id()]
+	if not batches.has(key): batches[key]={"kind":kind,"mat":mat,"transforms":[]}
+	batches[key].transforms.append(Transform3D(basis.scaled(size),pos))
+
+func _generate_vegetation() -> void:
+	var bark:=G.material("",Color(.28,.24,.17))
+	var leaf:=G.material("",Color(.18,.29,.12))
+	leaf.cull_mode=BaseMaterial3D.CULL_DISABLED
+	for plant in data.plants:
+		var p:=Vector3(float(plant[0]),height_at(float(plant[0]),float(plant[1])),float(plant[1]))
+		var s:=float(plant[3])
+		plant_cell=Vector2i(floori(p.x/128),floori(p.z/128))
+		var variant:=int(plant[2])
+		if variant==3 and int(absf(p.x+p.z))%5==0:
+			_batch("plant_flower",p,Vector3.ONE*s,leaf)
 			continue
-		var x := float(b[0])
-		var z := float(b[1])
-		var w := float(b[2])
-		var d := float(b[3])
-		var height := float(5 + (i * 7) % 3 * 3)
-		var min_y: float = minf(minf(height_at(x-w*0.5,z-d*0.5),height_at(x+w*0.5,z-d*0.5)),minf(height_at(x-w*0.5,z+d*0.5),height_at(x+w*0.5,z+d*0.5)))
-		var max_y: float = maxf(maxf(height_at(x-w*0.5,z-d*0.5),height_at(x+w*0.5,z-d*0.5)),maxf(height_at(x-w*0.5,z+d*0.5),height_at(x+w*0.5,z+d*0.5)))
-		# Terrain slope support: building floor sits above all footprint corners;
-		# a shallow concrete foundation extends down into the hillside.
-		var foundation_height: float = maxf(0.8,max_y-min_y+0.75)
-		G.box(self,Vector3(x,max_y-foundation_height*0.5,z),Vector3(w+0.25,foundation_height,d+0.25),G.material("concrete",Color(0.72,0.72,0.71)),true)
-		G.box(self, Vector3(x,max_y+height*0.5,z), Vector3(w,height,d), wall_mats[i % wall_mats.size()], true)
+		var slope:=Vector2(height_at(p.x+1,p.z)-height_at(p.x-1,p.z),height_at(p.x,p.z+1)-height_at(p.x,p.z-1)).length()*.5
+		if slope>.6: continue
+		if variant<2:
+			var h:=7.0 if variant==0 else 2.8
+			_batch("plant_trunk"+str(variant),p+Vector3(0,h*.5*s,0),Vector3(.25,h,.25)*s,bark)
+			for angle in range(8 if variant==0 else 5):
+				_batch("plant_frond"+str(variant),p+Vector3(0,h*s,0),Vector3(.65,1,5 if variant==0 else 2.8)*s,leaf,Basis.from_euler(Vector3(.26,float(angle)*TAU/(8. if variant==0 else 5.),0)))
+		else:
+			_batch("plant_trunk2",p+Vector3(0,2*s,0),Vector3(.3,4,.3)*s,bark)
+			for offset in [Vector3(-.8,3.8,.3),Vector3(.8,4.2,-.4),Vector3(0,5,0)]:
+				_batch("plant_crown2",p+offset*s,Vector3(3.2,2.8,3.2)*s,leaf)
+
+func _frond_mesh() -> ArrayMesh:
+	var tool:=_tool()
+	for segment in range(10):
+		var t0:=float(segment)/10.0
+		var t1:=float(segment+1)/10.0
+		var w0:=sin(t0*PI)*.5
+		var w1:=sin(t1*PI)*.5
+		var y0:=sin(t0*PI)*.22-t0*t0*.3
+		var y1:=sin(t1*PI)*.22-t1*t1*.3
+		_quad(tool,Vector3(-w0,y0,t0),Vector3(w0,y0,t0),Vector3(-w1,y1,t1),Vector3(w1,y1,t1))
+	tool.generate_normals()
+	tool.index()
+	return tool.commit()
+
+func _flush_batches() -> void:
+	var cube:=BoxMesh.new()
+	cube.size=Vector3.ONE
+	var crown:=SphereMesh.new()
+	crown.radius=.5
+	crown.height=1.0
+	crown.radial_segments=12
+	crown.rings=6
+	var trunk:=CylinderMesh.new()
+	trunk.top_radius=.34
+	trunk.bottom_radius=.5
+	trunk.height=1
+	trunk.radial_segments=10
+	var frond:=_frond_mesh()
+	var flower_scene: Node3D=load("res://assets/periwinkle/periwinkle_plant.gltf").instantiate()
+	var flower_nodes: Array=flower_scene.find_children("*","MeshInstance3D",true,false)
+	var flower: Mesh=flower_nodes[0].mesh
+	for group in batches.values():
+		var mm:=MultiMesh.new()
+		mm.transform_format=MultiMesh.TRANSFORM_3D
+		mm.mesh=crown if str(group.kind).begins_with("plant_crown") else (trunk if str(group.kind).begins_with("plant_trunk") else (frond if str(group.kind).begins_with("plant_frond") else cube))
+		if group.kind=="plant_flower": mm.mesh=flower
+		mm.instance_count=group.transforms.size()
+		var origin:=Vector3.ZERO
+		for transform in group.transforms: origin+=transform.origin
+		origin/=float(mm.instance_count)
+		for i in range(mm.instance_count):
+			var transform: Transform3D=group.transforms[i]
+			transform.origin-=origin
+			mm.set_instance_transform(i,transform)
+		var instance:=MultiMeshInstance3D.new()
+		instance.name=group.kind
+		instance.multimesh=mm
+		instance.position=origin
+		instance.material_override=null if group.kind=="plant_flower" else group.mat
+		instance.visibility_range_end=240
+		if group.kind=="plant_flower": instance.visibility_range_end=70
+		if group.kind=="plant_flower": instance.set_meta("flower",true)
+		instance.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(instance)
+		render_meshes.append(instance)
+		if str(group.kind).begins_with("plant_"):
+			instance.set_meta("vegetation",true)
+			instance.set_meta("stride",8 if group.kind=="plant_frond0" else (5 if group.kind=="plant_frond1" else (3 if group.kind=="plant_crown2" else 1)))
+			vegetation.append(instance)
+	batches.clear()
+	flower_scene.free()
+
+func _generate_roadside() -> void:
+	var concrete:=G.material("concrete",Color(.55,.55,.51))
+	var metal:=G.material("",Color(.22,.25,.25))
+	for coord in data.get("poles_inferred",[]):
+		var p:=_v2(coord)
+		var y:=height_at(p.x,p.y)
+		_batch("utility_pole",Vector3(p.x,y+3.5,p.y),Vector3(.18,7,.18),concrete)
+		_batch("utility_arm",Vector3(p.x,y+6.3,p.y),Vector3(1.4,.08,.08),metal)
+		for side in [-.5,0.,.5]:
+			_batch("utility_insulator",Vector3(p.x+side,y+6.5,p.y),Vector3(.09,.3,.09),G.material("",Color(.25,.19,.13)))
+		var body:=StaticBody3D.new()
+		var shape:=CollisionShape3D.new()
+		var resource:=CylinderShape3D.new()
+		resource.radius=.12
+		resource.height=7
+		shape.shape=resource
+		body.position=Vector3(p.x,y+3.5,p.y)
+		body.add_child(shape)
+		add_child(body)
+
+func apply_graphics(draw_distance: float,density: float,texture_quality: int) -> void:
+	for mesh in render_meshes:
+		mesh.visibility_range_end=minf(draw_distance,70.0 if mesh.has_meta("flower") else 240.0) if mesh.has_meta("vegetation") else draw_distance
+		var mat:=mesh.material_override as StandardMaterial3D
+		if mesh.material_override is ShaderMaterial:
+			mesh.material_override.set_shader_parameter("detail_normals",texture_quality>=2)
+			mesh.material_override.set_shader_parameter("ground_normal",load("res://assets/textures/akurana_ground_normal.jpg") if texture_quality>=2 else null)
+			mesh.material_override.set_shader_parameter("grass_texture",load("res://assets/textures/akurana_grass_low.jpg") if texture_quality==0 else load("res://assets/textures/akurana_grass.jpg"))
+			mesh.material_override.set_shader_parameter("soil_texture",load("res://assets/textures/akurana_soil_low.jpg") if texture_quality==0 else load("res://assets/textures/akurana_soil.jpg"))
+		if mat!=null:
+			mat.texture_filter=BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC if texture_quality>=2 else BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+			if mat.resource_name=="AkuranaAsphalt":
+				mat.albedo_texture=load("res://assets/textures/asphalt_low.jpg") if texture_quality==0 else load("res://assets/textures/asphalt.png")
+				mat.normal_enabled=texture_quality>0
+				mat.normal_texture=load("res://assets/textures/asphalt_normal_medium.jpg") if texture_quality==1 else (load("res://assets/textures/asphalt_normal.jpg") if texture_quality>=2 else null)
+				mat.roughness_texture=load("res://assets/textures/asphalt_roughness_medium.jpg") if texture_quality==1 else (load("res://assets/textures/asphalt_roughness.jpg") if texture_quality>=2 else null)
+	for mesh in vegetation:
+		var stride:=int(mesh.get_meta("stride",1))
+		mesh.multimesh.visible_instance_count=floori(float(mesh.multimesh.instance_count)/float(stride)*clampf(density,0,1))*stride
+

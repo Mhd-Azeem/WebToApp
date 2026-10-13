@@ -15,6 +15,8 @@ var blades: Array[Node3D] = []
 var mirrors: Array[SubViewport] = []
 var mirror_cameras: Array[Camera3D] = []
 var mirror_elapsed := 0.0
+var mirror_update_hz := 10.0
+var mirror_phase := 0
 var low_quality := true
 var cluster: Node2D
 var lamps: Array[SpotLight3D] = []
@@ -45,7 +47,7 @@ func _ready() -> void:
 	G.profile_mesh(self,[[-0.87,0.24,-1.1,-0.39],[-0.70,0.22,-1.07,-0.43],[-0.55,0.20,-1.0,-0.69]],leather).position=Vector3(0.65,-0.10,0)
 	G.box(self,Vector3(0.58,-0.36,-0.82),Vector3(0.35,0.19,0.025),trim)
 	G.box(self,Vector3(0.58,-0.36,-0.80),Vector3(0.32,0.16,0.018),rubber)
-	var screen := G.label(self,"AZ CONNECT\nCOLOMBO  â€¢  24Â°C",Vector3(0.58,-0.36,-0.78),22)
+	var screen := G.label(self,"AZ CONNECT\nCOLOMBO   |   24°C",Vector3(0.58,-0.36,-0.78),22)
 	screen.pixel_size=0.0016
 	screen.outline_size=0
 	screen.modulate=Color(0.38,0.8,0.9)
@@ -191,6 +193,7 @@ func surface(parent: Node3D,pos: Vector3,extent: Vector2,texture: Texture2D,flip
 
 func set_quality(low: bool) -> void:
 	low_quality=low
+	mirror_update_hz=10.0 if low else 30.0
 	for vp in mirrors: vp.size=Vector2i(192,112) if low else Vector2i(384,224)
 
 func _process(delta: float) -> void:
@@ -213,13 +216,17 @@ func _process(delta: float) -> void:
 		if sweep>=1: sweep=0
 	for i in range(blades.size()): blades[i].rotation.z=-PI/2+sin(sweep*PI)*1.10
 	mirror_elapsed+=delta
+	var update_mirror:=visible and mirror_elapsed>=1.0/(mirror_update_hz*3.0)
 	for i in range(mirrors.size()):
 		var cam := mirror_cameras[i]
 		var side := 1.0 if i==0 else -1.0
 		cam.global_position=vehicle.to_global(Vector3(side*1.05,1.25,0.4) if i<2 else Vector3(0,1.45,-2.3))
 		cam.look_at(cam.global_position-vehicle.global_basis.z*15+vehicle.global_basis.x*(side*3 if i<2 else 0.0),vehicle.global_basis.y)
-		mirrors[i].render_target_update_mode=SubViewport.UPDATE_ONCE if visible and mirror_elapsed>=(0.1 if low_quality else 1.0/30) else SubViewport.UPDATE_DISABLED
-	if mirror_elapsed>=(0.1 if low_quality else 1.0/30): mirror_elapsed=0
+		# Stagger mirrors instead of drawing three extra worlds in one frame.
+		mirrors[i].render_target_update_mode=SubViewport.UPDATE_ONCE if update_mirror and i==mirror_phase else SubViewport.UPDATE_DISABLED
+	if update_mirror:
+		mirror_elapsed=0
+		mirror_phase=(mirror_phase+1)%mirrors.size()
 	if not visible and owner_finger!=-1: cancel()
 
 func cancel() -> void:

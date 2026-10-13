@@ -6,13 +6,51 @@ var below_terrain_time := 0.0
 func _world_script() -> Script:
 	return preload("res://scripts/akurana_world.gd")
 
+func _settings_script() -> Script:
+	return preload("res://scripts/ui/akurana_settings.gd")
+
 func _ready() -> void:
 	super._ready()
 	akurana_world = get_child(0) as Node3D
 	akurana_world.name = "AkuranaWorld"
+	car.legacy_fall_recovery = false
+	settings.graphics_changed.connect(_apply_graphics)
+	_apply_graphics()
+	for label in interior.find_children("*","Label3D",true,false):
+		if label.text.contains("AZ CONNECT"): label.text=label.text.replace("COLOMBO","AKURANA")
 	# The Colombo grid traffic generator does not follow Akurana GIS roads.
 	traffic.set_enabled(false)
 	_spawn_akurana()
+
+func _apply_quality(_low: bool) -> void:
+	# Base setup calls this before the Akurana world reference is initialized.
+	if is_instance_valid(settings) and not settings.graphics.is_empty(): _apply_graphics()
+
+func _apply_graphics() -> void:
+	var quality: Dictionary=settings.graphics
+	low_quality=int(quality.shadows)==0
+	Engine.max_fps=int(quality.fps)
+	get_viewport().scaling_3d_scale=float(quality.scale)
+	var method:=RenderingServer.get_current_rendering_method()
+	# Compatibility drivers can expose fewer samples than desktop Vulkan.
+	get_viewport().msaa_3d=mini(int(quality.aa),Viewport.MSAA_4X) if method=="gl_compatibility" or OS.has_feature("android") else int(quality.aa)
+	camera.far=float(quality.distance)+90.0
+	sun.shadow_enabled=int(quality.shadows)>0
+	sun.directional_shadow_max_distance=[40.,65.,100.,160.][int(quality.shadows)]
+	var environment:=get_world_3d().environment
+	environment.fog_depth_begin=float(quality.distance)*.65
+	environment.fog_depth_end=float(quality.distance)
+	environment.ambient_light_energy=.5
+	environment.tonemap_mode=Environment.TONE_MAPPER_FILMIC
+	environment.ssao_enabled=method=="forward_plus" and int(quality.effects)>=1
+	environment.ssr_enabled=method=="forward_plus" and int(quality.effects)>=2
+	environment.volumetric_fog_enabled=method=="forward_plus" and int(quality.effects)>=2
+	environment.volumetric_fog_density=.003
+	interior.set_quality(int(quality.mirrors)==0)
+	interior.mirror_update_hz=[10.,15.,20.,30.][int(quality.mirrors)]
+	for vp in interior.mirrors:
+		vp.size=[Vector2i(192,112),Vector2i(256,144),Vector2i(384,224),Vector2i(512,288)][int(quality.mirrors)]
+	if is_instance_valid(akurana_world): akurana_world.apply_graphics(float(quality.distance),float(quality.vegetation),int(quality.textures))
 
 func _process(delta: float) -> void:
 	super._process(delta)
@@ -21,10 +59,13 @@ func _process(delta: float) -> void:
 	# The base cockpit/chase cameras were tuned for flat Colombo. Akurana
 	# slopes can intersect the virtual viewpoint and obscure roads entirely.
 	var location := camera.global_position
+	if camera_mode==1:
+		# Right-hand driving position. The modeled dashboard stays in camera space.
+		location=car.to_global(Vector3(-0.42,1.58,0.5))
 	var ground: float = float(akurana_world.height_at(location.x,location.z))
-	var floor_y: float = ground + (3.4 if camera_mode == 1 else 3.8)
+	var floor_y: float = ground + (1.9 if camera_mode == 1 else 1.0)
 	if camera_mode == 2:
-		floor_y = ground + 2.6
+		floor_y = ground + 1.6
 	if location.y < floor_y:
 		location.y = floor_y
 		camera.global_position = location
@@ -55,7 +96,7 @@ func _physics_process(delta: float) -> void:
 func _spawn_akurana() -> void:
 	if not is_instance_valid(car) or not is_instance_valid(akurana_world):
 		return
-	var spawn: Dictionary = akurana_world.road_spawn_near(Vector2(-113.0, 25.0))
+	var spawn: Dictionary = akurana_world.road_spawn_near(Vector2(-113.0, -25.0))
 	if spawn.is_empty():
 		push_error("Akurana spawn failed: no usable mapped road segments")
 		return

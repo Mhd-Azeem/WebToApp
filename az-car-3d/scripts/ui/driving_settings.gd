@@ -66,7 +66,7 @@ func _ready() -> void:
 		_save("render_scale",index))
 	if not OS.has_feature("android"):
 		var resolution := OptionButton.new()
-		for label in ["1280 Ã— 720","1600 Ã— 900","1920 Ã— 1080"]: resolution.add_item(label)
+		for label in ["1280 x 720","1600 x 900","1920 x 1080"]: resolution.add_item(label)
 		column.add_child(resolution)
 		resolution.item_selected.connect(func(index: int):
 			get_window().size=[Vector2i(1280,720),Vector2i(1600,900),Vector2i(1920,1080)][index])

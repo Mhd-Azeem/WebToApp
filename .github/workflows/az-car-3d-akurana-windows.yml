@@ -13,6 +13,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Install matching Godot 4.5
         shell: pwsh
         run: |
@@ -49,6 +52,17 @@ jobs:
         run: |
           & $env:GODOT_EXE --headless --path az-car-3d --script res://tests/akurana_smoke.gd
           if ($LASTEXITCODE -ne 0) { throw 'Akurana smoke checks failed' }
+      - name: Full-footprint, collider and hill-driving validation
+        shell: pwsh
+        run: |
+          python -m pip install 'shapely==2.1.2' 'numpy==2.2.6'
+          if ($LASTEXITCODE -ne 0) { throw 'GIS dependency installation failed' }
+          python az-car-3d/tools/check_akurana_geometry.py
+          if ($LASTEXITCODE -ne 0) { throw 'Geographic clearance/topology checks failed' }
+          & $env:GODOT_EXE --headless --path az-car-3d --script res://tests/akurana_geometry.gd 2>&1 | Tee-Object geometry.log
+          if ($LASTEXITCODE -ne 0 -or (Select-String geometry.log -Pattern 'SCRIPT ERROR|ERROR:')) { throw 'Runtime collider checks failed' }
+          & $env:GODOT_EXE --headless --path az-car-3d --script res://tests/akurana_hill_driving.gd 2>&1 | Tee-Object hills.log
+          if ($LASTEXITCODE -ne 0 -or (Select-String hills.log -Pattern 'SCRIPT ERROR|ERROR:')) { throw 'Hill-driving checks failed' }
       - name: Akurana vehicle-ground physics regression
         shell: pwsh
         run: |
@@ -61,6 +75,11 @@ jobs:
           & $env:GODOT_EXE --headless --path az-car-3d --export-release 'Windows Desktop' build/windows/AZCar3D-Akurana.exe
           if ($LASTEXITCODE -ne 0) { throw 'Windows export failed' }
           if (-not (Test-Path az-car-3d/build/windows/AZCar3D-Akurana.exe)) { throw 'EXE missing' }
+          '${{ github.sha }}' | Set-Content az-car-3d/build/windows/BUILD-COMMIT.txt
+          Copy-Item az-car-3d/docs/AKURANA_REALISM_UPGRADE.md az-car-3d/build/windows/README.md
+          Copy-Item az-car-3d/docs/ASSET_CREDITS.md az-car-3d/build/windows/ASSET-CREDITS.md
+          '@echo off', 'cd /d "%~dp0"', 'start "AZ Car 3D Akurana" AZCar3D-Akurana.exe --rendering-method forward_plus' | Set-Content az-car-3d/build/windows/Launch-Forward-Plus.cmd
+          '@echo off', 'cd /d "%~dp0"', 'start "AZ Car 3D Akurana" AZCar3D-Akurana.exe --rendering-method gl_compatibility' | Set-Content az-car-3d/build/windows/Launch-Compatibility.cmd
           $files = Get-ChildItem az-car-3d/build/windows -File
           if ($files.Count -eq 0) { throw 'No output files' }
       - name: Start the exported game
@@ -90,8 +109,12 @@ jobs:
               try { $stream.CopyTo([System.IO.Stream]::Null) } finally { $stream.Dispose() }
             }
           } finally { $archive.Dispose() }
+          $hash = (Get-FileHash AZCar3D-Akurana-Windows-x64.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  AZCar3D-Akurana-Windows-x64.zip" | Set-Content SHA256SUMS-Windows.txt
       - uses: actions/upload-artifact@v4
         with:
           name: AZCar3D-Akurana-Windows-x64-${{ github.sha }}
-          path: AZCar3D-Akurana-Windows-x64.zip
+          path: |
+            AZCar3D-Akurana-Windows-x64.zip
+            SHA256SUMS-Windows.txt
           if-no-files-found: error

@@ -29,6 +29,32 @@ The v0.5 shared coupe, colored traffic variants, generated terrain, tree and
 shrub meshes, rock shapes, park paths and benches are original procedural art.
 No external vegetation, terrain or car models were downloaded or redistributed.
 
+## Akurana rebuild additions (2026-10-13)
+
+The statement above describes the earlier v0.5 assets. The Akurana rebuild adds:
+
+- ambientCG **Asphalt012** OpenGL normal and roughness maps (1K, with 512 px
+  mobile variants), plus a 256 px version of the existing color map.
+  https://ambientcg.com/view?id=Asphalt012 — Lennart Demes, CC0 1.0 Universal.
+- ambientCG **Grass004** color and **Ground037** color/OpenGL normal maps (1K,
+  256 px low-quality color variants). Lennart Demes, CC0 1.0 Universal.
+  https://ambientcg.com/view?id=Grass004
+  https://ambientcg.com/view?id=Ground037
+- Poly Haven **Periwinkle Plant**, Amal Kumar, glTF and 1K textures. CC0 1.0
+  Universal. https://polyhaven.com/a/periwinkle_plant
+  https://docs.polyhaven.com/en/license
+  Sparse inferred ornamental ground cover; not a mapped botanical survey.
+- Original curved-frond palm/banana approximations, modular building details,
+  slope blend shader and utility pole geometry created for this rebuild are
+  licensed for redistribution with the project. They are procedural art,
+  not scans or copies of exact real objects.
+
+OSM geometry © OpenStreetMap contributors, ODbL 1.0.
+https://www.openstreetmap.org/copyright
+The compressed source snapshot is provided in `tools/source`; the derived
+database retains IDs, tags and attribution. The inherited Copernicus DEM
+fallback and its data limitations are described in AKURANA_REALISM_UPGRADE.md.
+
 The v0.6 generated PCM audio waveforms are original procedural works, dedicated
 to the public domain under CC0 1.0 Universal. No external recordings are used.
 https://creativecommons.org/publicdomain/zero/1.0/

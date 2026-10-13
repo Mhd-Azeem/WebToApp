@@ -1,4 +1,4 @@
-name: AZ Car 3D Akurana Preview APK
+name: AZ Car 3D Akurana APK
 on:
   push:
     branches: [feature/az-car-3d-akurana-map, fix/az-car-3d-akurana-ground]
@@ -18,6 +18,9 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -71,6 +74,23 @@ jobs:
         run: godot --headless --path az-car-3d --script res://tests/cockpit_checks.gd
       - name: Akurana geographic scene smoke checks
         run: godot --headless --path az-car-3d --script res://tests/akurana_smoke.gd
+      - name: Full-footprint and watertight road validation
+        run: |
+          set -euo pipefail
+          python3 -m pip install 'shapely==2.1.2' 'numpy==2.2.6'
+          python3 az-car-3d/tools/check_akurana_geometry.py
+          godot --headless --path az-car-3d --script res://tests/akurana_geometry.gd
+          godot --headless --path az-car-3d --script res://tests/akurana_hill_driving.gd
+      - name: Rendered instance and in-game screenshot inspection
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y xvfb libgl1-mesa-dri libglx-mesa0
+          xvfb-run -a godot --path az-car-3d --rendering-method gl_compatibility --script res://tests/akurana_instances.gd 2>&1 | tee az-car-3d/build/instances.log
+          if grep -E 'SCRIPT ERROR|ERROR:' az-car-3d/build/instances.log; then exit 1; fi
+          xvfb-run -a godot --path az-car-3d --rendering-method gl_compatibility --script res://tests/akurana_render.gd 2>&1 | tee az-car-3d/build/visual.log
+          if grep -E 'SCRIPT ERROR|ERROR:' az-car-3d/build/visual.log; then exit 1; fi
+          python3 az-car-3d/tools/check_visual_outputs.py
       - name: Prove car stays on physical Akurana terrain under gravity
         run: |
           set -euo pipefail
@@ -84,6 +104,9 @@ jobs:
           test -s az-car-3d/build/AZ-Car-3D-Akurana.apk
           "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose az-car-3d/build/AZ-Car-3D-Akurana.apk
           "$ANDROID_HOME/build-tools/35.0.1/aapt" dump badging az-car-3d/build/AZ-Car-3D-Akurana.apk | tee az-car-3d/build/apk-badging.txt
+          printf '%s\n' '${{ github.sha }}' > az-car-3d/build/BUILD-COMMIT.txt
+          cd az-car-3d/build
+          sha256sum AZ-Car-3D-Akurana.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:

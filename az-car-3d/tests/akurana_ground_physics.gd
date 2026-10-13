@@ -17,10 +17,10 @@ func _check_terrain() -> void:
 	if not is_instance_valid(car) or not is_instance_valid(world):
 		_fail("scene did not initialize the car and terrain")
 		return
-	var ground_y := float(world.call("height_at", -113.0, 25.0))
+	var ground_y := float(world.call("height_at", -113.0, -25.0))
 	var query := PhysicsRayQueryParameters3D.create(
-		Vector3(-113.0, ground_y + 25.0, 25.0),
-		Vector3(-113.0, ground_y - 25.0, 25.0)
+		Vector3(-113.0, ground_y + 25.0, -25.0),
+		Vector3(-113.0, ground_y - 25.0, -25.0)
 	)
 	query.exclude = [car.get_rid()]
 	query.collision_mask = 1
@@ -65,3 +65,5 @@ func _check_terrain() -> void:
 			return
 	print("AKURANA GROUND PHYSICS PASS: raycast hit %.2f, car settled at %.2f, surface %.2f" % [hit.position.y, car.global_position.y, final_y])
 	quit(0)
+
+

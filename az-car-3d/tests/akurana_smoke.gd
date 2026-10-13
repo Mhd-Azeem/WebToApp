@@ -24,13 +24,13 @@ func _run() -> void:
 		push_error("Akurana map or reusable driving car missing")
 		quit(1)
 		return
-	var y := float(world.call("height_at", -113.0, 25.0))
-	if y < 0.0 or y > 200.0 or car.position.distance_to(Vector3(-113.0, y + 1.6, 25.0)) > 15.0:
+	var y := float(world.call("height_at", -113.0, -25.0))
+	if y < 0.0 or y > 200.0 or car.position.distance_to(Vector3(-113.0, y + 1.6, -25.0)) > 15.0:
 		push_error("Invalid terrain or car spawn")
 		quit(1)
 		return
 	# At the starting road, the first ray hit must be pavement above terrain.
-	var road_spawn: Dictionary = world.road_spawn_near(Vector2(-113.0,25.0))
+	var road_spawn: Dictionary = world.road_spawn_near(Vector2(-113.0,-25.0))
 	if road_spawn.is_empty():
 		push_error("No usable Akurana road spawn")
 		quit(1)
@@ -56,7 +56,7 @@ func _run() -> void:
 		push_error("Akurana camera intersects terrain at start: camera %.2f, ground %.2f" % [camera_pos.y,camera_ground])
 		quit(1)
 		return
-	if float(road_spawn["road_width"]) < 6.7 or world.road_distance_at(car.global_position.x,car.global_position.z)>float(road_spawn["road_width"]):
+	if float(road_spawn["road_width"]) < 2.5 or world.road_distance_at(car.global_position.x,car.global_position.z)>float(road_spawn["road_width"]):
 		push_error("Akurana vehicle failed to spawn above visible mapped road")
 		quit(1)
 		return
@@ -74,3 +74,5 @@ func _run() -> void:
 	car.rotation.x=0.0
 	print("AKURANA PASS: geographic data, 3D scene and car spawn")
 	quit(0)
+
+

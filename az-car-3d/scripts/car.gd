@@ -25,6 +25,7 @@ var hazards := false
 var high_beams := false
 # Override for georeferenced map scenes; legacy Colombo defaults stay unchanged.
 var spawn_point := Vector3(-3.5, 1.0, 120.0)
+var legacy_fall_recovery := true
 
 func _ready() -> void:
 	if vehicle_configuration!=null:
@@ -90,7 +91,7 @@ func _physics_process(delta: float) -> void:
 	wheel_physics.apply(self,wheels,drive_force,b,handbrake,transmission.mode==Transmission.Mode.AUTOMATIC and transmission.selector=="P",delta)
 	if wheel_physics.grounded:
 		apply_central_force(-global_basis.y*minf(500,signed_speed*signed_speed*transmission.config.downforce_coefficient))
-	if position.y < -5: reset()
+	if legacy_fall_recovery and position.y < -5: reset()
 
 func reset() -> void:
 	linear_velocity=Vector3.ZERO

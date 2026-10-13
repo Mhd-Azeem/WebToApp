@@ -1,0 +1,10 @@
+{
+  "roads": 107,
+  "buildings": 1594,
+  "road_tiles": 265,
+  "omitted": 275,
+  "plants_inferred": 2607,
+  "pavement_area_m2": 72982.7,
+  "building_clearance_conflicts": 0,
+  "source_sha256": "f6cd0a58c5a91bd2325be6fd520778574856446756adacc67bfc30eb360c7283"
+}
