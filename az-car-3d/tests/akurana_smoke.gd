@@ -29,5 +29,21 @@ func _run() -> void:
 		push_error("Invalid terrain or car spawn")
 		quit(1)
 		return
+	# At the starting road, the first ray hit must be pavement above terrain.
+	var road_spawn: Dictionary = world.road_spawn_near(Vector2(-113.0,25.0))
+	if road_spawn.is_empty():
+		push_error("No usable Akurana road spawn")
+		quit(1)
+		return
+	var road_pos: Vector3 = road_spawn["position"]
+	var terrain_level: float = world.height_at(road_pos.x,road_pos.z)
+	var ray := PhysicsRayQueryParameters3D.create(road_pos + Vector3(0,12,0),road_pos - Vector3(0,12,0))
+	ray.exclude = [car.get_rid()]
+	ray.collision_mask = 1
+	var hit: Dictionary = scene.get_world_3d().direct_space_state.intersect_ray(ray)
+	if hit.is_empty() or float(hit.position.y) < terrain_level + 0.30:
+		push_error("Akurana mapped road is hidden below terrain at spawn")
+		quit(1)
+		return
 	print("AKURANA PASS: geographic data, 3D scene and car spawn")
 	quit(0)
