@@ -41,8 +41,8 @@ func _run() -> void:
 	ray.exclude = [car.get_rid()]
 	ray.collision_mask = 1
 	var hit: Dictionary = scene.get_world_3d().direct_space_state.intersect_ray(ray)
-	if hit.is_empty() or float(hit.position.y) < terrain_level + 0.30:
-		push_error("Akurana mapped road is hidden below terrain at spawn")
+	if hit.is_empty() or float(hit.position.y) < terrain_level + 0.035 or float(hit.position.y) > terrain_level + 0.20:
+		push_error("Akurana road must be visible but nearly flush with terrain at spawn")
 		quit(1)
 		return
 	# Validate the actual gameplay camera against local GIS elevation.
@@ -56,7 +56,7 @@ func _run() -> void:
 		push_error("Akurana camera intersects terrain at start: camera %.2f, ground %.2f" % [camera_pos.y,camera_ground])
 		quit(1)
 		return
-	if world.road_distance_at(car.global_position.x,car.global_position.z)>float(road_spawn["road_width"]):
+	if float(road_spawn["road_width"]) < 6.7 or world.road_distance_at(car.global_position.x,car.global_position.z)>float(road_spawn["road_width"]):
 		push_error("Akurana vehicle failed to spawn above visible mapped road")
 		quit(1)
 		return
