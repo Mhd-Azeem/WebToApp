@@ -1,0 +1,89 @@
+name: Publish Akurana v2 verified prerelease
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/az-car-3d-akurana-ground]
+    paths: ['.github/workflows/az-car-3d-akurana-v2-release.yml']
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 247deaa1738ec3390dac8b460ad96a80601639b2
+      - name: Verify immutable platform runs and download their artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p output/android output/windows
+          gh api "repos/$GH_REPO/actions/runs/38435064367" > output/android-run.json
+          gh api "repos/$GH_REPO/actions/runs/38435064422" > output/windows-run.json
+          python3 - <<'PY'
+          import json
+          for name in ['android','windows']:
+              run=json.load(open('output/'+name+'-run.json'))
+              assert run['head_sha']=='247deaa1738ec3390dac8b460ad96a80601639b2'
+              assert run['status']=='completed' and run['conclusion']=='success'
+              assert run['head_branch']=='fix/az-car-3d-akurana-ground'
+          PY
+          gh run download 38435064367 --repo "$GH_REPO" --name AZ-Car-3D-Akurana-247deaa1738ec3390dac8b460ad96a80601639b2 --dir output/android
+          gh run download 38435064422 --repo "$GH_REPO" --name AZCar3D-Akurana-Windows-x64-247deaa1738ec3390dac8b460ad96a80601639b2 --dir output/windows
+      - name: Verify source revision, archive contents and checksums
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, pathlib, zipfile
+          root=pathlib.Path('output')
+          target='247deaa1738ec3390dac8b460ad96a80601639b2'
+          assert (root/'android/BUILD-COMMIT.txt').read_text(encoding='utf-8-sig').strip()==target
+          for folder,name,checksum in [('android','AZ-Car-3D-Akurana.apk','SHA256SUMS.txt'),('windows','AZCar3D-Akurana-Windows-x64.zip','SHA256SUMS-Windows.txt')]:
+              file=root/folder/name
+              assert file.stat().st_size>1024
+              expected=(root/folder/checksum).read_text(encoding='utf-8-sig').split()[0]
+              assert hashlib.sha256(file.read_bytes()).hexdigest()==expected
+              with zipfile.ZipFile(file) as archive:
+                  assert archive.testzip() is None
+                  if folder=='windows':
+                      for required in ['AZCar3D-Akurana.exe','AZCar3D-Akurana.pck']:
+                          assert archive.getinfo(required).file_size>0
+                      assert archive.read('BUILD-COMMIT.txt').decode('utf-8-sig').strip()==target
+                  else:
+                      assert archive.getinfo('AndroidManifest.xml').file_size>0
+          PY
+          cp output/android/AZ-Car-3D-Akurana.apk output/
+          cp output/windows/AZCar3D-Akurana-Windows-x64.zip output/
+          cp az-car-3d/docs/CHANGELOG_AKURANA_V2.md output/CHANGELOG.md
+          cp az-car-3d/docs/AKURANA_REALISM_UPGRADE.md output/KNOWN-LIMITATIONS.md
+          printf '%s\n' '247deaa1738ec3390dac8b460ad96a80601639b2' > output/BUILD-COMMIT.txt
+          (cd output/android && zip -q -r ../IN-GAME-INSPECTION.zip visual geographic-validation.json instances.log visual.log)
+          (cd output && sha256sum AZ-Car-3D-Akurana.apk AZCar3D-Akurana-Windows-x64.zip IN-GAME-INSPECTION.zip > SHA256SUMS.txt)
+      - name: Publish a separate versioned prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag='car3d-akurana-v2.0.0'
+          if gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then
+            echo 'Release tag already exists; refusing to overwrite existing assets.'
+            exit 1
+          fi
+          cat > output/RELEASE-NOTES.md <<'NOTES'
+          Rebuild of the existing playable Akurana environment using full mapped OSM footprints, road/shoulder/setback validation, unioned junctions, consistent east/up/south coordinates, tiled collision and rendering, offline baked scenery, PBR ground/asphalt, building details and saved graphics presets.
+
+          Build commit: `247deaa1738ec3390dac8b460ad96a80601639b2`.
+          Android validation: https://github.com/Mhd-Azeem/WebToApp/actions/runs/38435064367
+          Windows validation: https://github.com/Mhd-Azeem/WebToApp/actions/runs/38435064422
+
+          Both workflows passed import, gameplay, geometry and driving checks. Android passed rendered scene/instance checks, APK export and signature validation. Windows passed EXE/PCK export, portable archive checks and exported EXE startup. Inspection images, SHA-256 checksums, changelog and limitations are attached.
+
+          This is a development prerelease. The full photorealistic brief is not certified: terrain retains a reduced 53.33m DSM fallback; grading and many building/scenery details are inferred. Detailed drainage, guardrails, shelters, wiring and mapped traffic AI remain incomplete. Physical Android performance has not been tested. APK uses the persistent debug signing key, not production Play Store signing. No fixed frame rate or GTA-level quality claim is made.
+
+          Existing Colombo, drivetrain, controls, cockpit and other repository projects are preserved. No merge into main or overwrite of historical releases is performed.
+          NOTES
+          gh release create "$tag" --repo "$GH_REPO" --target 247deaa1738ec3390dac8b460ad96a80601639b2 --title 'AZ Car 3D — Akurana Realism Upgrade' --notes-file output/RELEASE-NOTES.md --prerelease output/AZ-Car-3D-Akurana.apk output/AZCar3D-Akurana-Windows-x64.zip output/SHA256SUMS.txt output/CHANGELOG.md output/KNOWN-LIMITATIONS.md output/BUILD-COMMIT.txt output/IN-GAME-INSPECTION.zip
