@@ -1,6 +1,7 @@
 extends "res://scripts/main.gd"
 ## Alternate entry scene: all original cockpit, drivetrain and touch UI remain.
 var akurana_world: Node3D
+var below_terrain_time := 0.0
 
 func _world_script() -> Script:
 	return preload("res://scripts/akurana_world.gd")
@@ -33,11 +34,20 @@ func _process(delta: float) -> void:
 	camera.look_at(location + Vector3(forward.x*25.0,0.5,forward.z*25.0),Vector3.UP)
 	camera.near = 0.08
 
-func _physics_process(_delta: float) -> void:
-	if is_instance_valid(car) and is_instance_valid(akurana_world):
-		var surface := float(akurana_world.height_at(car.global_position.x, car.global_position.z))
-		if car.global_position.y < surface + 0.10:
+func _physics_process(delta: float) -> void:
+	if not is_instance_valid(car) or not is_instance_valid(akurana_world):
+		return
+	# Off-road driving is allowed. Never reset just because the body origin is
+	# near/below local DEM height; suspension and road clearance vary on hills.
+	# Recovery is reserved for a sustained true fall below terrain.
+	var surface: float = float(akurana_world.height_at(car.global_position.x,car.global_position.z))
+	if car.global_position.y < surface - 6.0:
+		below_terrain_time += delta
+		if below_terrain_time > 1.5:
+			below_terrain_time = 0.0
 			_spawn_akurana()
+	else:
+		below_terrain_time = 0.0
 
 func _spawn_akurana() -> void:
 	if not is_instance_valid(car) or not is_instance_valid(akurana_world):
@@ -50,6 +60,7 @@ func _spawn_akurana() -> void:
 	car.reset()
 	car.rotation = Vector3(0.0, float(spawn["yaw"]), 0.0)
 	car.sleeping = false
+	below_terrain_time = 0.0
 	car.transmission.message = "Akurana: spawned on mapped road"
 
 func _press(id: String, down: bool) -> void:
