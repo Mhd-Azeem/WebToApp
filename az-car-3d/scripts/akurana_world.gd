@@ -8,7 +8,9 @@ const HALF_SIZE = 640.0
 # Each GIS height sample spans ~53 m. Subdivision is essential: otherwise
 # the physics/visible triangle surface diverges sharply from height_at().
 const TERRAIN_SUBDIVISIONS = 8
-const ROAD_CLEARANCE = 0.65
+const ROAD_CLEARANCE = 0.08
+const TWO_WAY_MIN_WIDTH = 6.8
+const SHOULDER_WIDTH = 1.6
 var heights: PackedByteArray = PackedByteArray()
 var mapped_roads: Array = []
 var terrain_texture: ImageTexture
@@ -38,7 +40,7 @@ func road_spawn_near(point: Vector2 = Vector2(-113.0, 25.0)) -> Dictionary:
 	var best_width := 0.0
 	for feature in mapped_roads:
 		if not feature is Array or feature.size() < 2: continue
-		var width := float(feature[0])
+		var width := maxf(TWO_WAY_MIN_WIDTH,float(feature[0]))
 		var path: Array = feature[1]
 		for i in range(path.size() - 1):
 			var a := Vector2(float(path[i][0]),float(path[i][1]))
@@ -167,39 +169,84 @@ func _generate_terrain() -> void:
 	var material := _grass_material()
 	_finish(tool,material,true)
 
+func _road_vertex(point: Vector2, normal: Vector2, lateral: float, rise: float) -> Vector3:
+	var offset := point + normal * lateral
+	return Vector3(offset.x, height_at(offset.x,offset.y) + rise, offset.y)
+
+func _quad(tool: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3) -> void:
+	_triangle(tool,a,b,c)
+	_triangle(tool,c,b,d)
+
 func _generate_roads(roads: Array) -> void:
-	# Subdivide centerlines so they closely follow the terrain raster.
-	var tool := SurfaceTool.new()
-	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	# The roads follow the existing Akurana OSM centerlines. Give the mapped
+	# segments a drivable two-way profile, blended shoulders and markings.
+	var pavement := SurfaceTool.new()
+	var shoulders := SurfaceTool.new()
+	var center_lines := SurfaceTool.new()
+	var edge_lines := SurfaceTool.new()
+	for tool in [pavement,shoulders,center_lines,edge_lines]:
+		tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var generated := 0
 	for feature in roads:
 		if not feature is Array or feature.size() < 2:
 			continue
-		var width: float = float(feature[0])
+		var width: float = maxf(TWO_WAY_MIN_WIDTH,float(feature[0]))
 		var path: Array = feature[1]
-		for i in range(path.size() - 1):
-			var a := Vector2(float(path[i][0]), float(path[i][1]))
-			var b := Vector2(float(path[i + 1][0]), float(path[i + 1][1]))
-			if a.distance_to(b) < 0.1:
+		var progress := 0.0
+		for i in range(path.size()-1):
+			var a := Vector2(float(path[i][0]),float(path[i][1]))
+			var b := Vector2(float(path[i+1][0]),float(path[i+1][1]))
+			var length := a.distance_to(b)
+			if length < 0.1:
 				continue
-			var normal := Vector2(-(b - a).normalized().y, (b - a).normalized().x) * width * 0.5
-			var parts := maxi(1, ceili(a.distance_to(b) / 3.0))
+			var normal := Vector2(-(b-a).y,(b-a).x).normalized()
+			var parts := maxi(1,ceili(length/2.0))
 			for s in range(parts):
-				var p := a.lerp(b, float(s) / float(parts))
-				var q := a.lerp(b, float(s + 1) / float(parts))
-				var al := Vector3(p.x + normal.x, height_at(p.x + normal.x, p.y + normal.y) + ROAD_CLEARANCE, p.y + normal.y)
-				var ar := Vector3(p.x - normal.x, height_at(p.x - normal.x, p.y - normal.y) + ROAD_CLEARANCE, p.y - normal.y)
-				var bl := Vector3(q.x + normal.x, height_at(q.x + normal.x, q.y + normal.y) + ROAD_CLEARANCE, q.y + normal.y)
-				var br := Vector3(q.x - normal.x, height_at(q.x - normal.x, q.y - normal.y) + ROAD_CLEARANCE, q.y - normal.y)
-				_triangle(tool, al, bl, ar)
-				_triangle(tool, bl, br, ar)
-				generated += 1
-	if generated > 0:
-		var road_mat := G.material("asphalt", Color(0.70,0.70,0.70))
-		road_mat.uv1_triplanar = true
-		road_mat.uv1_scale = Vector3(0.17,0.17,0.17)
-		road_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-		_finish(tool, road_mat, true)
+				var p := a.lerp(b,float(s)/float(parts))
+				var q := a.lerp(b,float(s+1)/float(parts))
+				var half: float = width*0.5
+				var pl := _road_vertex(p,normal,half,ROAD_CLEARANCE)
+				var pr := _road_vertex(p,normal,-half,ROAD_CLEARANCE)
+				var ql := _road_vertex(q,normal,half,ROAD_CLEARANCE)
+				var qr := _road_vertex(q,normal,-half,ROAD_CLEARANCE)
+				_quad(pavement,pl,pr,ql,qr)
+				# Shoulder wings slope back down to local ground. Unlike an elevated
+				# slab, a car can enter the road from either side.
+				for sign in [-1.0,1.0]:
+					var inner_p := _road_vertex(p,normal,sign*half,ROAD_CLEARANCE)
+					var outer_p := _road_vertex(p,normal,sign*(half+SHOULDER_WIDTH),0.01)
+					var inner_q := _road_vertex(q,normal,sign*half,ROAD_CLEARANCE)
+					var outer_q := _road_vertex(q,normal,sign*(half+SHOULDER_WIDTH),0.01)
+					_quad(shoulders,inner_p,outer_p,inner_q,outer_q)
+					var paint_p := _road_vertex(p,normal,sign*(half-0.22),ROAD_CLEARANCE+0.018)
+					var paint_p2 := _road_vertex(p,normal,sign*(half-0.11),ROAD_CLEARANCE+0.018)
+					var paint_q := _road_vertex(q,normal,sign*(half-0.22),ROAD_CLEARANCE+0.018)
+					var paint_q2 := _road_vertex(q,normal,sign*(half-0.11),ROAD_CLEARANCE+0.018)
+					_quad(edge_lines,paint_p,paint_p2,paint_q,paint_q2)
+				# Alternating painted centerline segments separate opposing lanes.
+				if fmod(progress+length*(float(s)+0.5)/float(parts),9.0)<5.0:
+					_quad(center_lines,_road_vertex(p,normal,0.075,ROAD_CLEARANCE+0.022),_road_vertex(p,normal,-0.075,ROAD_CLEARANCE+0.022),_road_vertex(q,normal,0.075,ROAD_CLEARANCE+0.022),_road_vertex(q,normal,-0.075,ROAD_CLEARANCE+0.022))
+				generated+=1
+			progress+=length
+	if generated==0:
+		push_error("Akurana mapped roads contain no usable segments")
+		return
+	var road_mat := G.material("asphalt",Color(0.75,0.75,0.75))
+	road_mat.uv1_triplanar=true
+	road_mat.uv1_scale=Vector3(0.17,0.17,0.17)
+	road_mat.cull_mode=BaseMaterial3D.CULL_DISABLED
+	_finish(pavement,road_mat,true)
+	var shoulder_mat := G.material("concrete",Color(0.59,0.57,0.51))
+	shoulder_mat.uv1_triplanar=true
+	shoulder_mat.uv1_scale=Vector3(0.25,0.25,0.25)
+	shoulder_mat.cull_mode=BaseMaterial3D.CULL_DISABLED
+	_finish(shoulders,shoulder_mat,true)
+	var center_mat := G.material("",Color(0.91,0.73,0.21))
+	center_mat.cull_mode=BaseMaterial3D.CULL_DISABLED
+	_finish(center_lines,center_mat,false)
+	var edge_mat := G.material("",Color(0.91,0.91,0.85))
+	edge_mat.cull_mode=BaseMaterial3D.CULL_DISABLED
+	_finish(edge_lines,edge_mat,false)
 
 func _generate_buildings(buildings: Array) -> void:
 	var wall_mats := [
