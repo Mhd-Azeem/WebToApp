@@ -13,14 +13,24 @@ func _ready() -> void:
 	traffic.set_enabled(false)
 	_spawn_akurana()
 
+func _physics_process(_delta: float) -> void:
+	if is_instance_valid(car) and is_instance_valid(akurana_world):
+		var surface := float(akurana_world.height_at(car.global_position.x, car.global_position.z))
+		if car.global_position.y < surface - 4.0:
+			_spawn_akurana()
+
 func _spawn_akurana() -> void:
 	if not is_instance_valid(car) or not is_instance_valid(akurana_world):
 		return
-	var road_height := float(akurana_world.call("height_at", -113.0, 25.0))
-	car.set("spawn_point", Vector3(-113.0, road_height + 2.1, 25.0))
+	var spawn: Dictionary = akurana_world.road_spawn_near(Vector2(-113.0, 25.0))
+	if spawn.is_empty():
+		push_error("Akurana spawn failed: no usable mapped road segments")
+		return
+	car.set("spawn_point", spawn["position"])
 	car.reset()
-	car.rotation = Vector3.ZERO
+	car.rotation = Vector3(0.0, float(spawn["yaw"]), 0.0)
 	car.sleeping = false
+	car.transmission.message = "Akurana: spawned on mapped road"
 
 func _press(id: String, down: bool) -> void:
 	super._press(id, down)
