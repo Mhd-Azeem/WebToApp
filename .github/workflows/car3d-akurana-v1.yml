@@ -1,0 +1,65 @@
+name: Publish Car3D Akurana v1
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/az-car-3d-akurana-ground]
+    paths: ['.github/workflows/car3d-akurana-v1.yml']
+permissions:
+  actions: read
+  contents: write
+jobs:
+  publish-v1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Wait for both exact matching Akurana builds and verify success
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          for run in 38356453854 38356453934; do
+            for attempt in $(seq 1 45); do
+              status=$(gh api "repos/$GH_REPO/actions/runs/$run" --jq '.status')
+              if [ "$status" = "completed" ]; then break; fi
+              sleep 20
+            done
+            status=$(gh api "repos/$GH_REPO/actions/runs/$run" --jq '.status')
+            result=$(gh api "repos/$GH_REPO/actions/runs/$run" --jq '.conclusion')
+            revision=$(gh api "repos/$GH_REPO/actions/runs/$run" --jq '.head_sha')
+            test "$status" = completed
+            test "$result" = success
+            test "$revision" = 199a44a6894c1c568863f39c6d7bf4cf07782c36
+          done
+      - name: Download exact verified Android and Windows artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p output/android output/windows
+          gh run download 38356453854 --repo "$GH_REPO" --name AZ-Car-3D-Akurana-199a44a6894c1c568863f39c6d7bf4cf07782c36 --dir output/android
+          gh run download 38356453934 --repo "$GH_REPO" --name AZCar3D-Akurana-Windows-x64-199a44a6894c1c568863f39c6d7bf4cf07782c36 --dir output/windows
+          test -s output/android/AZ-Car-3D-Akurana.apk
+          test -s output/windows/AZCar3D-Akurana-Windows-x64.zip
+          unzip -t output/windows/AZCar3D-Akurana-Windows-x64.zip
+          unzip -Z1 output/windows/AZCar3D-Akurana-Windows-x64.zip | grep -Fx AZCar3D-Akurana.exe
+          unzip -Z1 output/windows/AZCar3D-Akurana-Windows-x64.zip | grep -Fx AZCar3D-Akurana.pck
+          cp output/android/AZ-Car-3D-Akurana.apk output/AZ-Car-3D-Akurana.apk
+          cp output/windows/AZCar3D-Akurana-Windows-x64.zip output/AZCar3D-Akurana-Windows-x64.zip
+          cd output
+          sha256sum AZ-Car-3D-Akurana.apk AZCar3D-Akurana-Windows-x64.zip > SHA256SUMS.txt
+      - name: Publish version 1 as an independent stable GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag=car3d-akurana-v1.0.0
+          sha=199a44a6894c1c568863f39c6d7bf4cf07782c36
+          notes="Car3D Akurana version 1: sloped-terrain camera clearance, road visibility/contrast, road-based vehicle spawn, and map collision regression tests. Exact matching Android and Windows builds passed automated validation. Android debug-signed APK; Windows portable ZIP includes EXE and PCK. Real-device visual validation remains necessary."
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Version 1 already published, refusing to overwrite immutable release"
+            exit 1
+          fi
+          gh release create "$tag" --target "$sha" --title "Car3D Akurana v1.0" --notes "$notes" --latest output/AZ-Car-3D-Akurana.apk output/AZCar3D-Akurana-Windows-x64.zip output/SHA256SUMS.txt
