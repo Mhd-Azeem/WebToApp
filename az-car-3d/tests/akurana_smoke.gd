@@ -45,5 +45,18 @@ func _run() -> void:
 		push_error("Akurana mapped road is hidden below terrain at spawn")
 		quit(1)
 		return
+	# Validate the actual gameplay camera against local GIS elevation.
+	scene.camera_mode=1
+	await process_frame
+	var camera_pos: Vector3=scene.camera.global_position
+	var camera_ground: float=world.height_at(camera_pos.x,camera_pos.z)
+	if camera_pos.y < camera_ground+1.9:
+		push_error("Akurana camera intersects terrain at start")
+		quit(1)
+		return
+	if world.road_distance_at(car.global_position.x,car.global_position.z)>float(road_spawn["road_width"]):
+		push_error("Akurana vehicle failed to spawn above visible mapped road")
+		quit(1)
+		return
 	print("AKURANA PASS: geographic data, 3D scene and car spawn")
 	quit(0)
