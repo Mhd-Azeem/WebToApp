@@ -2,6 +2,7 @@ extends "res://scripts/main.gd"
 ## Alternate entry scene: all original cockpit, drivetrain and touch UI remain.
 var akurana_world: Node3D
 var below_terrain_time := 0.0
+var town_traffic: Node3D
 
 func _world_script() -> Script:
 	return preload("res://scripts/akurana_world.gd")
