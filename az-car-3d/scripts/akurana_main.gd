@@ -21,15 +21,16 @@ func _process(delta: float) -> void:
 	# slopes can intersect the virtual viewpoint and obscure roads entirely.
 	var location := camera.global_position
 	var ground: float = float(akurana_world.height_at(location.x,location.z))
-	var floor_y: float = ground + (2.15 if camera_mode == 1 else 2.8)
+	var floor_y: float = ground + (3.4 if camera_mode == 1 else 3.8)
 	if camera_mode == 2:
-		floor_y = ground + 1.9
+		floor_y = ground + 2.6
 	if location.y < floor_y:
 		location.y = floor_y
 		camera.global_position = location
-		# Keep the horizon directed along the vehicle without looking underground.
-		var forward := car.global_basis.z
-		camera.look_at(location + Vector3(forward.x*25.0,1.0,forward.z*25.0),Vector3.UP)
+	# Always aim approximately horizontally in Akurana: the standard Colombo
+	# camera targets would pitch through steep slopes even above ground.
+	var forward := car.global_basis.z
+	camera.look_at(location + Vector3(forward.x*25.0,0.5,forward.z*25.0),Vector3.UP)
 	camera.near = 0.08
 
 func _physics_process(_delta: float) -> void:
