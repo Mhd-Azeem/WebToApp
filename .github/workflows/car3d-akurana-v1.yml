@@ -18,7 +18,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          for run in 38357943896 38357943870; do
+          for run in 38358456129 38358456123; do
             for attempt in $(seq 1 45); do
               status=$(gh api "repos/$GH_REPO/actions/runs/$run" --jq '.status')
               if [ "$status" = "completed" ]; then break; fi
@@ -29,7 +29,7 @@ jobs:
             revision=$(gh api "repos/$GH_REPO/actions/runs/$run" --jq '.head_sha')
             test "$status" = completed
             test "$result" = success
-            test "$revision" = 3b11b3abeefe2344bacae3b211106519efa0e276
+            test "$revision" = 29baa05453ef1869dfb4152ff363199e4fcfc0ba
           done
       - name: Download exact verified Android and Windows artifacts
         env:
@@ -38,8 +38,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p output/android output/windows
-          gh run download 38357943896 --repo "$GH_REPO" --name AZ-Car-3D-Akurana-3b11b3abeefe2344bacae3b211106519efa0e276 --dir output/android
-          gh run download 38357943870 --repo "$GH_REPO" --name AZCar3D-Akurana-Windows-x64-3b11b3abeefe2344bacae3b211106519efa0e276 --dir output/windows
+          gh run download 38358456129 --repo "$GH_REPO" --name AZ-Car-3D-Akurana-29baa05453ef1869dfb4152ff363199e4fcfc0ba --dir output/android
+          gh run download 38358456123 --repo "$GH_REPO" --name AZCar3D-Akurana-Windows-x64-29baa05453ef1869dfb4152ff363199e4fcfc0ba --dir output/windows
           test -s output/android/AZ-Car-3D-Akurana.apk
           test -s output/windows/AZCar3D-Akurana-Windows-x64.zip
           unzip -t output/windows/AZCar3D-Akurana-Windows-x64.zip
@@ -56,7 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           tag=car3d-akurana-v1.0.0
-          sha=3b11b3abeefe2344bacae3b211106519efa0e276
+          sha=29baa05453ef1869dfb4152ff363199e4fcfc0ba
           notes="Car3D Akurana version 1: sloped-terrain camera clearance, road visibility/contrast, road-based vehicle spawn, and map collision regression tests. Exact matching Android and Windows builds passed automated validation. Android debug-signed APK; Windows portable ZIP includes EXE and PCK. Real-device visual validation remains necessary."
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "Version 1 already published, refusing to overwrite immutable release"
