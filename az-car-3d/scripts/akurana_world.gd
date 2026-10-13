@@ -6,6 +6,7 @@ const DATA = "res://data/akurana/preview.json"
 const GRID_SIZE = 25
 const HALF_SIZE = 640.0
 var heights: PackedByteArray = PackedByteArray()
+var mapped_roads: Array = []
 
 func _ready() -> void:
 	var raw := FileAccess.get_file_as_string(DATA)
@@ -18,9 +19,40 @@ func _ready() -> void:
 		push_error("Invalid Akurana height grid")
 		return
 	_generate_terrain()
-	_generate_roads(parsed.get("roads", []))
+	mapped_roads = parsed.get("roads", [])
+	_generate_roads(mapped_roads)
 	_generate_buildings(parsed.get("buildings", []))
 	G.label(self, "AKURANA - SRI LANKA", Vector3(-150, 37, 40), 24)
+
+
+func road_spawn_near(point: Vector2 = Vector2(-113.0, 25.0)) -> Dictionary:
+	# Project onto the nearest mapped road segment instead of spawning in a field.
+	var best_distance := INF
+	var best_point := Vector2.ZERO
+	var best_heading := 0.0
+	var best_width := 0.0
+	for feature in mapped_roads:
+		if not feature is Array or feature.size() < 2: continue
+		var width := float(feature[0])
+		var path: Array = feature[1]
+		for i in range(path.size() - 1):
+			var a := Vector2(float(path[i][0]),float(path[i][1]))
+			var b := Vector2(float(path[i + 1][0]),float(path[i + 1][1]))
+			var ab := b - a
+			if ab.length_squared() < 1.0: continue
+			var fraction := clampf((point - a).dot(ab) / ab.length_squared(), 0.0, 1.0)
+			var nearest := a + ab * fraction
+			var distance := nearest.distance_to(point)
+			if distance < best_distance:
+				best_distance = distance
+				best_point = nearest
+				best_heading = atan2(ab.x, ab.y)
+				best_width = width
+	if not is_finite(best_distance):
+		return {}
+	# A modest lift gives suspension time to settle onto the road collision.
+	return {"position": Vector3(best_point.x, height_at(best_point.x, best_point.y) + 1.65, best_point.y),
+		"yaw": best_heading, "distance": best_distance, "road_width": best_width}
 
 func height_at(x: float, z: float) -> float:
 	if heights.size() != GRID_SIZE * GRID_SIZE:
@@ -103,7 +135,7 @@ func _generate_roads(roads: Array) -> void:
 			for s in range(parts):
 				var p := a.lerp(b, float(s) / float(parts))
 				var q := a.lerp(b, float(s + 1) / float(parts))
-				var al := Vector3(p.x + normal.x, height_at(p.x + normal.x, p.y + normal.y) + 0.22, p.y + normal.y)
+				var al := Vector3(p.x + normal.x, height_at(p.x + normal.x, p.y + normal.y) + 0.48, p.y + normal.y)
 				var ar := Vector3(p.x - normal.x, height_at(p.x - normal.x, p.y - normal.y) + 0.22, p.y - normal.y)
 				var bl := Vector3(q.x + normal.x, height_at(q.x + normal.x, q.y + normal.y) + 0.22, q.y + normal.y)
 				var br := Vector3(q.x - normal.x, height_at(q.x - normal.x, q.y - normal.y) + 0.22, q.y - normal.y)
@@ -111,9 +143,7 @@ func _generate_roads(roads: Array) -> void:
 				_triangle(tool, bl, br, ar)
 				generated += 1
 	if generated > 0:
-		var road_mat := G.material("asphalt", Color(0.78, 0.78, 0.78))
-		road_mat.uv1_triplanar = true
-		road_mat.uv1_scale = Vector3(0.18, 0.18, 0.18)
+		var road_mat := G.material("", Color(0.19, 0.20, 0.22)) # Clearly distinguish paved roads from grass.
 		_finish(tool, road_mat, true)
 
 func _generate_buildings(buildings: Array) -> void:
