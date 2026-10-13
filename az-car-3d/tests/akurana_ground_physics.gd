@@ -47,5 +47,21 @@ func _check_terrain() -> void:
 	if car.position.y < 0.0:
 		_fail("car fell below map and respawned unexpectedly")
 		return
+	# Off-road terrain is drivable: moving onto grass must not snap back
+	# to the mapped road even as the suspension settles over uneven ground.
+	var offroad := Vector2(320.0,320.0)
+	var away: float = world.road_distance_at(offroad.x,offroad.y)
+	if away < 5.0:
+		_fail("off-road regression coordinates overlap a road")
+		return
+	car.linear_velocity=Vector3.ZERO
+	car.angular_velocity=Vector3.ZERO
+	car.global_position=Vector3(offroad.x,world.height_at(offroad.x,offroad.y)+2.0,offroad.y)
+	car.sleeping=false
+	for tick in range(90):
+		await physics_frame
+		if Vector2(car.global_position.x,car.global_position.z).distance_to(offroad)>12.0:
+			_fail("vehicle unexpectedly respawned when driving off road")
+			return
 	print("AKURANA GROUND PHYSICS PASS: raycast hit %.2f, car settled at %.2f, surface %.2f" % [hit.position.y, car.global_position.y, final_y])
 	quit(0)
