@@ -20,8 +20,8 @@ func _process(delta: float) -> void:
 	# The base cockpit/chase cameras were tuned for flat Colombo. Akurana
 	# slopes can intersect the virtual viewpoint and obscure roads entirely.
 	var location := camera.global_position
-	var ground := akurana_world.height_at(location.x,location.z)
-	var floor_y := ground + (2.15 if camera_mode == 1 else 2.8)
+	var ground: float = float(akurana_world.height_at(location.x,location.z))
+	var floor_y: float = ground + (2.15 if camera_mode == 1 else 2.8)
 	if camera_mode == 2:
 		floor_y = ground + 1.9
 	if location.y < floor_y:
