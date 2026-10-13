@@ -1,0 +1,50 @@
+name: Publish Car3D Akurana Release
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/az-car-3d-akurana-ground]
+    paths:
+      - '.github/workflows/publish-car3d-akurana-release.yml'
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Download verified Akurana Android and Windows build artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p output/android output/windows
+          gh run download 38345414285 --repo "$GH_REPO" --name AZ-Car-3D-Akurana-454edd1dab8a140173708e7b938f8219e9c894c0 --dir output/android
+          gh run download 38345414384 --repo "$GH_REPO" --name AZCar3D-Akurana-Windows-x64-454edd1dab8a140173708e7b938f8219e9c894c0 --dir output/windows
+          test -s output/android/AZ-Car-3D-Akurana.apk
+          test -s output/windows/AZCar3D-Akurana-Windows-x64.zip
+          unzip -t output/windows/AZCar3D-Akurana-Windows-x64.zip
+          unzip -Z1 output/windows/AZCar3D-Akurana-Windows-x64.zip | grep -Fx 'AZCar3D-Akurana.exe'
+          unzip -Z1 output/windows/AZCar3D-Akurana-Windows-x64.zip | grep -Fx 'AZCar3D-Akurana.pck'
+          cp output/android/AZ-Car-3D-Akurana.apk output/AZ-Car-3D-Akurana.apk
+          cp output/windows/AZCar3D-Akurana-Windows-x64.zip output/AZCar3D-Akurana-Windows-x64.zip
+          cd output
+          sha256sum AZ-Car-3D-Akurana.apk AZCar3D-Akurana-Windows-x64.zip > SHA256SUMS.txt
+      - name: Publish stable Car3D Akurana release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="car3d-akurana"
+          target="454edd1dab8a140173708e7b938f8219e9c894c0"
+          notes="Akurana map ground and road spawning fix. Includes verified Android APK and portable Windows x64 EXE/PCK ZIP. Built from commit $target. Android is debug-signed; validation passed in separate Android and Windows GitHub Actions workflows. Gameplay and map accuracy still require on-device review."
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" output/AZ-Car-3D-Akurana.apk output/AZCar3D-Akurana-Windows-x64.zip output/SHA256SUMS.txt --clobber
+            gh release edit "$tag" --title "Car3D Akurana" --notes "$notes" --prerelease=false --latest
+          else
+            gh release create "$tag" --target "$target" --title "Car3D Akurana" --notes "$notes" --latest output/AZ-Car-3D-Akurana.apk output/AZCar3D-Akurana-Windows-x64.zip output/SHA256SUMS.txt
+          fi
