@@ -8,9 +8,10 @@ const HALF_SIZE = 640.0
 # Each GIS height sample spans ~53 m. Subdivision is essential: otherwise
 # the physics/visible triangle surface diverges sharply from height_at().
 const TERRAIN_SUBDIVISIONS = 8
-const ROAD_CLEARANCE = 0.90
+const ROAD_CLEARANCE = 0.28
 var heights: PackedByteArray = PackedByteArray()
 var mapped_roads: Array = []
+var terrain_texture: ImageTexture
 
 func _ready() -> void:
 	var raw := FileAccess.get_file_as_string(DATA)
@@ -120,6 +121,30 @@ func _finish(tool: SurfaceTool, material: Material, solid: bool) -> void:
 		# the render mesh's visibility distance/LOD.
 		add_child(body)
 
+func _grass_material() -> StandardMaterial3D:
+	# Small deterministic tile texture adds vegetation/soil variation without
+	# requiring downloads. Keep mobile RAM/draw overhead modest.
+	var noise := FastNoiseLite.new()
+	noise.seed = 27419
+	noise.frequency = 0.055
+	noise.fractal_octaves = 3
+	var img := Image.create(128,128,false,Image.FORMAT_RGB8)
+	for z in range(128):
+		for x in range(128):
+			var n := noise.get_noise_2d(float(x),float(z))
+			var d := noise.get_noise_2d(float(x+500),float(z+500))
+			var grass := Color(0.30,0.43,0.23).lerp(Color(0.49,0.55,0.29),clampf(0.48+n*0.85,0.0,1.0))
+			grass = grass.lerp(Color(0.40,0.35,0.25),clampf((d-0.28)*0.65,0.0,0.23))
+			img.set_pixel(x,z,grass)
+	terrain_texture = ImageTexture.create_from_image(img)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = terrain_texture
+	mat.roughness = 1.0
+	mat.uv1_triplanar = true
+	mat.uv1_scale = Vector3(0.11,0.11,0.11)
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return mat
+
 func _generate_terrain() -> void:
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -139,8 +164,7 @@ func _generate_terrain() -> void:
 			var p11 := Vector3(x1,height_at(x1,z1),z1)
 			_triangle(tool,p00,p01,p10)
 			_triangle(tool,p10,p01,p11)
-	var material := G.material("",Color(0.28,0.43,0.22))
-	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var material := _grass_material()
 	_finish(tool,material,true)
 
 func _generate_roads(roads: Array) -> void:
@@ -171,7 +195,9 @@ func _generate_roads(roads: Array) -> void:
 				_triangle(tool, bl, br, ar)
 				generated += 1
 	if generated > 0:
-		var road_mat := G.material("", Color(0.12, 0.13, 0.15)) # High contrast dark asphalt.
+		var road_mat := G.material("asphalt", Color(0.70,0.70,0.70))
+		road_mat.uv1_triplanar = true
+		road_mat.uv1_scale = Vector3(0.17,0.17,0.17)
 		road_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 		_finish(tool, road_mat, true)
 
@@ -190,5 +216,10 @@ func _generate_buildings(buildings: Array) -> void:
 		var w := float(b[2])
 		var d := float(b[3])
 		var height := float(5 + (i * 7) % 3 * 3)
-		var y := height_at(x, z)
-		G.box(self, Vector3(x, y + height * 0.5, z), Vector3(w, height, d), wall_mats[i % wall_mats.size()], true)
+		var min_y: float = minf(minf(height_at(x-w*0.5,z-d*0.5),height_at(x+w*0.5,z-d*0.5)),minf(height_at(x-w*0.5,z+d*0.5),height_at(x+w*0.5,z+d*0.5)))
+		var max_y: float = maxf(maxf(height_at(x-w*0.5,z-d*0.5),height_at(x+w*0.5,z-d*0.5)),maxf(height_at(x-w*0.5,z+d*0.5),height_at(x+w*0.5,z+d*0.5)))
+		# Terrain slope support: building floor sits above all footprint corners;
+		# a shallow concrete foundation extends down into the hillside.
+		var foundation_height: float = maxf(0.8,max_y-min_y+0.75)
+		G.box(self,Vector3(x,max_y-foundation_height*0.5,z),Vector3(w+0.25,foundation_height,d+0.25),G.material("concrete",Color(0.72,0.72,0.71)),true)
+		G.box(self, Vector3(x,max_y+height*0.5,z), Vector3(w,height,d), wall_mats[i % wall_mats.size()], true)
