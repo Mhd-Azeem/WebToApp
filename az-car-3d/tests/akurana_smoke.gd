@@ -47,11 +47,13 @@ func _run() -> void:
 		return
 	# Validate the actual gameplay camera against local GIS elevation.
 	scene.camera_mode=1
-	await process_frame
+	# SceneTree process_frame is emitted before Node._process; wait for a full
+	# rendered camera update rather than sampling the previous transform.
+	for frame in range(3): await process_frame
 	var camera_pos: Vector3=scene.camera.global_position
 	var camera_ground: float=world.height_at(camera_pos.x,camera_pos.z)
 	if camera_pos.y < camera_ground+1.9:
-		push_error("Akurana camera intersects terrain at start")
+		push_error("Akurana camera intersects terrain at start: camera %.2f, ground %.2f" % [camera_pos.y,camera_ground])
 		quit(1)
 		return
 	if world.road_distance_at(car.global_position.x,car.global_position.z)>float(road_spawn["road_width"]):
