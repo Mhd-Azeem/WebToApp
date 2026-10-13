@@ -13,10 +13,29 @@ func _ready() -> void:
 	traffic.set_enabled(false)
 	_spawn_akurana()
 
+func _process(delta: float) -> void:
+	super._process(delta)
+	if not is_instance_valid(akurana_world) or not is_instance_valid(camera) or not is_instance_valid(car):
+		return
+	# The base cockpit/chase cameras were tuned for flat Colombo. Akurana
+	# slopes can intersect the virtual viewpoint and obscure roads entirely.
+	var location := camera.global_position
+	var ground := akurana_world.height_at(location.x,location.z)
+	var floor_y := ground + (2.15 if camera_mode == 1 else 2.8)
+	if camera_mode == 2:
+		floor_y = ground + 1.9
+	if location.y < floor_y:
+		location.y = floor_y
+		camera.global_position = location
+		# Keep the horizon directed along the vehicle without looking underground.
+		var forward := car.global_basis.z
+		camera.look_at(location + Vector3(forward.x*25.0,1.0,forward.z*25.0),Vector3.UP)
+	camera.near = 0.08
+
 func _physics_process(_delta: float) -> void:
 	if is_instance_valid(car) and is_instance_valid(akurana_world):
 		var surface := float(akurana_world.height_at(car.global_position.x, car.global_position.z))
-		if car.global_position.y < surface - 4.0:
+		if car.global_position.y < surface + 0.10:
 			_spawn_akurana()
 
 func _spawn_akurana() -> void:
