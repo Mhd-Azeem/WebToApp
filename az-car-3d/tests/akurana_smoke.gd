@@ -60,5 +60,17 @@ func _run() -> void:
 		push_error("Akurana vehicle failed to spawn above visible mapped road")
 		quit(1)
 		return
+	# A hill-tilted chassis must produce a tilted driver camera, not a
+	# world-horizontal camera as in the previous Akurana build.
+	scene.camera_mode=1
+	car.rotation.x=0.18
+	scene._process(0.016)
+	var camera_up: Vector3=scene.camera.global_basis.y.normalized()
+	var car_up: Vector3=car.global_basis.y.normalized()
+	if camera_up.dot(car_up) < 0.97:
+		push_error("Akurana cockpit camera does not follow vehicle slope")
+		quit(1)
+		return
+	car.rotation.x=0.0
 	print("AKURANA PASS: geographic data, 3D scene and car spawn")
 	quit(0)
