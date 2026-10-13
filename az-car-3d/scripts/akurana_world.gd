@@ -31,27 +31,35 @@ func height_at(x: float, z: float) -> float:
 	var iz := mini(int(floor(v)), GRID_SIZE - 2)
 	var fx := u - float(ix)
 	var fz := v - float(iz)
-	var a := lerpf(float(heights[iz * GRID_SIZE + ix]), float(heights[iz * GRID_SIZE + ix + 1]), fx)
-	var b := lerpf(float(heights[(iz + 1) * GRID_SIZE + ix]), float(heights[(iz + 1) * GRID_SIZE + ix + 1]), fx)
-	return lerpf(a, b, fz)
+	# Match the actual two-triangle terrain mesh exactly. Bilinear sampling
+	# placed asphalt *under* the mesh by up to several metres on steep hills.
+	var h00 := float(heights[iz * GRID_SIZE + ix])
+	var h10 := float(heights[iz * GRID_SIZE + ix + 1])
+	var h01 := float(heights[(iz + 1) * GRID_SIZE + ix])
+	var h11 := float(heights[(iz + 1) * GRID_SIZE + ix + 1])
+	if fx + fz <= 1.0:
+		return h00 * (1.0 - fx - fz) + h10 * fx + h01 * fz
+	return h11 * (fx + fz - 1.0) + h10 * (1.0 - fz) + h01 * (1.0 - fx)
 
 func _triangle(tool: SurfaceTool, a: Vector3, b: Vector3, c: Vector3) -> void:
 	tool.add_vertex(a)
 	tool.add_vertex(b)
 	tool.add_vertex(c)
 
-func _finish(tool: SurfaceTool, material: Material, solid: bool) -> void:
+func _finish(tool: SurfaceTool, material: Material, solid: bool, feature: String = "") -> void:
 	tool.generate_normals()
 	var mesh: ArrayMesh = tool.commit()
 	if mesh == null:
 		return
 	var instance := MeshInstance3D.new()
+	if not feature.is_empty():
+		instance.name = "Akurana" + feature + "Surface"
 	instance.mesh = mesh
 	instance.material_override = material
 	add_child(instance)
 	if solid:
 		var body := StaticBody3D.new()
-		body.name = "TerrainOrRoadCollision"
+		body.name = "Akurana" + feature + "Collision" if not feature.is_empty() else "TerrainOrRoadCollision"
 		var shape := CollisionShape3D.new()
 		# Collision is intentionally two-sided: the 30 m DSM terrain mesh is a
 		# thin surface, and raycast vehicle wheels must hit it from above.
@@ -81,13 +89,16 @@ func _generate_terrain() -> void:
 			_triangle(tool, p00, p01, p10)
 			_triangle(tool, p10, p01, p11)
 	var material := G.material("", Color(0.28, 0.43, 0.22))
-	_finish(tool, material, true)
+	_finish(tool, material, true, "Terrain")
 
 func _generate_roads(roads: Array) -> void:
 	# Subdivide centerlines so they closely follow the terrain raster.
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var generated := 0
+	var stripe_tool := SurfaceTool.new()
+	stripe_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var stripe_count := 0
 	for feature in roads:
 		if not feature is Array or feature.size() < 2:
 			continue
@@ -99,22 +110,36 @@ func _generate_roads(roads: Array) -> void:
 			if a.distance_to(b) < 0.1:
 				continue
 			var normal := Vector2(-(b - a).normalized().y, (b - a).normalized().x) * width * 0.5
-			var parts := maxi(1, ceili(a.distance_to(b) / 10.0))
+			var parts := maxi(1, ceili(a.distance_to(b) / 5.0))
 			for s in range(parts):
 				var p := a.lerp(b, float(s) / float(parts))
 				var q := a.lerp(b, float(s + 1) / float(parts))
-				var al := Vector3(p.x + normal.x, height_at(p.x + normal.x, p.y + normal.y) + 0.22, p.y + normal.y)
-				var ar := Vector3(p.x - normal.x, height_at(p.x - normal.x, p.y - normal.y) + 0.22, p.y - normal.y)
-				var bl := Vector3(q.x + normal.x, height_at(q.x + normal.x, q.y + normal.y) + 0.22, q.y + normal.y)
-				var br := Vector3(q.x - normal.x, height_at(q.x - normal.x, q.y - normal.y) + 0.22, q.y - normal.y)
+				var al := Vector3(p.x + normal.x, height_at(p.x + normal.x, p.y + normal.y) + 0.42, p.y + normal.y)
+				var ar := Vector3(p.x - normal.x, height_at(p.x - normal.x, p.y - normal.y) + 0.42, p.y - normal.y)
+				var bl := Vector3(q.x + normal.x, height_at(q.x + normal.x, q.y + normal.y) + 0.42, q.y + normal.y)
+				var br := Vector3(q.x - normal.x, height_at(q.x - normal.x, q.y - normal.y) + 0.42, q.y - normal.y)
 				_triangle(tool, al, bl, ar)
 				_triangle(tool, bl, br, ar)
 				generated += 1
+				if width >= 6.0 and s % 4 == 0:
+					# Short centerline dashes make road geometry visible at a glance.
+					var p0 := p.lerp(q, 0.1)
+					var p1 := p.lerp(q, 0.85)
+					var stripe_normal := normal.normalized() * 0.08
+					var sl := Vector3(p0.x + stripe_normal.x, height_at(p0.x + stripe_normal.x, p0.y + stripe_normal.y) + 0.45, p0.y + stripe_normal.y)
+					var sr := Vector3(p0.x - stripe_normal.x, height_at(p0.x - stripe_normal.x, p0.y - stripe_normal.y) + 0.45, p0.y - stripe_normal.y)
+					var el := Vector3(p1.x + stripe_normal.x, height_at(p1.x + stripe_normal.x, p1.y + stripe_normal.y) + 0.45, p1.y + stripe_normal.y)
+					var er := Vector3(p1.x - stripe_normal.x, height_at(p1.x - stripe_normal.x, p1.y - stripe_normal.y) + 0.45, p1.y - stripe_normal.y)
+					_triangle(stripe_tool, sl, el, sr)
+					_triangle(stripe_tool, el, er, sr)
+					stripe_count += 1
 	if generated > 0:
 		var road_mat := G.material("asphalt", Color(0.78, 0.78, 0.78))
 		road_mat.uv1_triplanar = true
 		road_mat.uv1_scale = Vector3(0.18, 0.18, 0.18)
-		_finish(tool, road_mat, true)
+		_finish(tool, road_mat, true, "Road")
+	if stripe_count > 0:
+		_finish(stripe_tool, G.material("", Color(0.94, 0.91, 0.77)), false, "Centerline")
 
 func _generate_buildings(buildings: Array) -> void:
 	var wall_mats := [

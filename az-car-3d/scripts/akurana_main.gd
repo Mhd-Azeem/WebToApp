@@ -17,9 +17,17 @@ func _spawn_akurana() -> void:
 	if not is_instance_valid(car) or not is_instance_valid(akurana_world):
 		return
 	var road_height := float(akurana_world.call("height_at", -113.0, 25.0))
-	car.set("spawn_point", Vector3(-113.0, road_height + 2.1, 25.0))
+	# First frame must already be directly over the visible A9 mesh.
+	car.set("spawn_point", Vector3(-113.0, road_height + 0.95, 25.0))
 	car.reset()
 	car.rotation = Vector3.ZERO
+	car.handbrake = 0.0
+	# Immediate drive-away default on this Akurana preview. Manual mode,
+	# clutch, ignition, and H-shifter remain selectable with M.
+	if car.transmission.mode == 0:
+		car.transmission.toggle(0.0)
+	car.transmission.select("D", 0.0, 1.0)
+	car.transmission.message = "Akurana A9: W / GAS to drive | M: manual | E: ignition"
 	car.sleeping = false
 
 func _press(id: String, down: bool) -> void:

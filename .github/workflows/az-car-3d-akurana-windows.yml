@@ -54,6 +54,11 @@ jobs:
         run: |
           & $env:GODOT_EXE --headless --path az-car-3d --script res://tests/akurana_ground_physics.gd 2>&1 | Tee-Object ground-physics.log
           if ($LASTEXITCODE -ne 0 -or (Select-String -Path ground-physics.log -Pattern 'SCRIPT ERROR|ERROR:')) { throw 'Akurana car must remain on map terrain' }
+      - name: Verify Akurana asphalt visibility and powered driving
+        shell: pwsh
+        run: |
+          & $env:GODOT_EXE --headless --path az-car-3d --script res://tests/akurana_roads_drive.gd 2>&1 | Tee-Object roads-drive.log
+          if ($LASTEXITCODE -ne 0 -or (Select-String -Path roads-drive.log -Pattern 'SCRIPT ERROR|ERROR:')) { throw 'Akurana roads/drive test failed' }
       - name: Export Windows release
         shell: pwsh
         run: |
