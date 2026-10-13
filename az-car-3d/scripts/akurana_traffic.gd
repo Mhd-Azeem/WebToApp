@@ -37,7 +37,7 @@ func _build() -> void:
 			distance+=Vector2(float(path[i][0]),float(path[i][1])).distance_to(Vector2(float(path[i+1][0]),float(path[i+1][1])))
 		if distance>75.0: candidates.append(path)
 	if candidates.is_empty(): return
-	var names: Array[String]=["sedan","hatchback","van","bus","suv","van","sedan","bus","van","suv","bus","hatchback"]
+	var names: Array[String]=["sedan","hatchback","van","bus","lorry","van","sedan","bus","lorry","suv","bus","hatchback"]
 	var count:=mini(12,candidates.size()*2)
 	for i in range(count):
 		var path: Array=candidates[i%candidates.size()]
@@ -59,8 +59,9 @@ func _build() -> void:
 		body.name="AkuranaTraffic"+str(i)
 		add_child(body)
 		var colors: Array[Color]=[Color(.82,.84,.82),Color(.16,.32,.48),Color(.70,.18,.18),Color(.85,.72,.25),Color(.31,.37,.38)]
-		Coupe.traffic_model(body,colors[i%colors.size()],kind)
+		Coupe.traffic_model(body,colors[i%colors.size()],"van" if kind=="lorry" else kind)
 		if kind=="bus": _bus_detail(body)
+		if kind=="lorry": _lorry_detail(body)
 		if kind=="van": _van_detail(body)
 		actors.append(body)
 		routes.append(route)
@@ -84,6 +85,14 @@ func _bus_detail(body: Node3D) -> void:
 	var white:=G.material("",Color(.87,.87,.79))
 	G.box(body,Vector3(0,2.2,0),Vector3(2.12,.38,5.7),white)
 	G.box(body,Vector3(0,1.15,0),Vector3(2.18,.26,5.8),blue)
+
+func _lorry_detail(body: Node3D) -> void:
+	# Distinct tall cargo box and undercarriage from the van-based cab mesh.
+	var cargo:=G.material("",Color(.72,.72,.68))
+	var rails:=G.material("",Color(.23,.27,.31))
+	G.box(body,Vector3(0,1.86,-1.45),Vector3(2.06,2.12,3.25),cargo)
+	for side in [-1.0,1.0]:
+		G.box(body,Vector3(side*1.04,1.86,-1.45),Vector3(.055,1.98,3.18),rails)
 
 func _van_detail(body: Node3D) -> void:
 	var trim:=G.material("",Color(.72,.76,.77))
