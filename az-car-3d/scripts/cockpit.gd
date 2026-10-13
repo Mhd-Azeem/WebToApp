@@ -34,22 +34,23 @@ func _ready() -> void:
 	# Tapered eight-sided cross sections, rather than a rectangular dashboard.
 	var dash := G.profile_mesh(self,[[-1.40,1.45,-0.65,-0.31],[-1.12,1.44,-0.70,-0.29],[-0.92,1.35,-0.73,-0.34],[-0.79,1.26,-0.70,-0.40]],leather)
 	dash.position.x=0.38
-	G.profile_mesh(self,[[-1.09,0.34,-0.43,-0.20],[-0.91,0.34,-0.47,-0.21],[-0.84,0.30,-0.47,-0.27]],rubber)
+	dash.position.y=-0.10
+	G.profile_mesh(self,[[-1.09,0.34,-0.43,-0.20],[-0.91,0.34,-0.47,-0.21],[-0.84,0.30,-0.47,-0.27]],rubber).position.y=-0.10
 	for x in [-0.66,0.47,0.76,1.48]:
-		G.box(self,Vector3(x,-0.40,-0.77),Vector3(0.23,0.12,0.035),trim)
-		G.box(self,Vector3(x,-0.40,-0.746),Vector3(0.21,0.095,0.022),rubber)
+		G.box(self,Vector3(x,-0.50,-0.77),Vector3(0.23,0.12,0.035),trim)
+		G.box(self,Vector3(x,-0.50,-0.746),Vector3(0.21,0.095,0.022),rubber)
 		for i in range(4):
-			G.box(self,Vector3(x,-0.434+i*0.023,-0.727),Vector3(0.20,0.008,0.018),leather)
+			G.box(self,Vector3(x,-0.534+i*0.023,-0.727),Vector3(0.20,0.008,0.018),leather)
 	# Passenger stack, screen, knobs and lower console.
-	G.profile_mesh(self,[[-0.87,0.24,-1.1,-0.39],[-0.70,0.22,-1.07,-0.43],[-0.55,0.20,-1.0,-0.69]],leather).position.x=0.65
-	G.box(self,Vector3(0.58,-0.26,-0.82),Vector3(0.35,0.19,0.025),trim)
-	G.box(self,Vector3(0.58,-0.26,-0.80),Vector3(0.32,0.16,0.018),rubber)
-	var screen := G.label(self,"AZ CONNECT\nCOLOMBO  â€¢  24Â°C",Vector3(0.58,-0.26,-0.78),22)
+	G.profile_mesh(self,[[-0.87,0.24,-1.1,-0.39],[-0.70,0.22,-1.07,-0.43],[-0.55,0.20,-1.0,-0.69]],leather).position=Vector3(0.65,-0.10,0)
+	G.box(self,Vector3(0.58,-0.36,-0.82),Vector3(0.35,0.19,0.025),trim)
+	G.box(self,Vector3(0.58,-0.36,-0.80),Vector3(0.32,0.16,0.018),rubber)
+	var screen := G.label(self,"AZ CONNECT\nCOLOMBO  â€¢  24Â°C",Vector3(0.58,-0.36,-0.78),22)
 	screen.pixel_size=0.0016
 	screen.outline_size=0
 	screen.modulate=Color(0.38,0.8,0.9)
-	for x in [0.52,0.65,0.78]: cylinder(self,Vector3(x,-0.64,-0.94),0.033,0.023,trim)
-	hazard_target=cylinder(self,Vector3(0.40,-0.37,-0.77),0.018,0.015,G.material("",Color(0.70,0.08,0.04)))
+	for x in [0.52,0.65,0.78]: cylinder(self,Vector3(x,-0.74,-0.94),0.033,0.023,trim)
+	hazard_target=cylinder(self,Vector3(0.40,-0.47,-0.77),0.018,0.015,G.material("",Color(0.70,0.08,0.04)))
 	for side in [-1.0,1.0]:
 		var x := -0.86 if side<0 else 1.67
 		var pillar := G.box(self,Vector3(x,0.13,-1.03),Vector3(0.085,1.15,0.13),leather)
@@ -61,7 +62,7 @@ func _ready() -> void:
 	# Natural 370 mm wheel; tilted mounting and rotation are separate transforms.
 	var mount := Node3D.new()
 	add_child(mount)
-	mount.position=Vector3(-0.06,-0.26,-0.78)
+	mount.position=Vector3(-0.06,-0.37,-0.78)
 	mount.rotation.x=deg_to_rad(-16)
 	cylinder(mount,Vector3(0,0,-0.12),0.052,0.25,rubber)
 	wheel=Node3D.new()
@@ -100,7 +101,7 @@ func _ready() -> void:
 	cluster.vehicle=vehicle
 	cluster.cockpit=self
 	panel.add_child(cluster)
-	surface(self,Vector3(0,-0.205,-0.825),Vector2(0.57,0.235),panel.get_texture(),false)
+	surface(self,Vector3(0,-0.315,-0.825),Vector2(0.57,0.235),panel.get_texture(),false)
 	for side in [-1.0,1.0]:
 		var housing := G.box(self,Vector3(-0.78 if side<0 else 0.90,-0.16,-1.28),Vector3(0.27,0.16,0.08),rubber)
 		var vp := SubViewport.new()
