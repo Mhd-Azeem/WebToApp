@@ -22,6 +22,19 @@ func _ready() -> void:
 	# The Colombo grid traffic generator does not follow Akurana GIS roads.
 	traffic.set_enabled(false)
 	_spawn_akurana()
+	# Instantiate Akurana mapped-road traffic after the car and map exist.
+	town_traffic=Node3D.new()
+	town_traffic.name="AkuranaMappedTraffic"
+	town_traffic.set_script(preload("res://scripts/akurana_traffic.gd"))
+	add_child(town_traffic)
+	town_traffic.configure(akurana_world,car)
+	town_traffic.set_enabled(settings.traffic_toggle.button_pressed)
+	settings.traffic_changed.connect(_on_akurana_traffic_changed)
+
+func _on_akurana_traffic_changed(value: bool) -> void:
+	traffic.set_enabled(false)
+	if is_instance_valid(town_traffic):
+		town_traffic.set_enabled(value)
 
 func _apply_quality(_low: bool) -> void:
 	# Base setup calls this before the Akurana world reference is initialized.
