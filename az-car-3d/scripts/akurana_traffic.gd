@@ -37,8 +37,11 @@ func _build() -> void:
 			distance+=Vector2(float(path[i][0]),float(path[i][1])).distance_to(Vector2(float(path[i+1][0]),float(path[i+1][1])))
 		if distance>32.0:
 			var close: float=INF
-			for point in path:
-				close=minf(close,Vector2(float(point[0]),float(point[1])).distance_to(Vector2(player.global_position.x,player.global_position.z)))
+			var player_2d:=Vector2(player.global_position.x,player.global_position.z)
+			for segment in range(path.size()-1):
+				var a:=Vector2(float(path[segment][0]),float(path[segment][1]))
+				var b:=Vector2(float(path[segment+1][0]),float(path[segment+1][1]))
+				close=minf(close,player_2d.distance_to(Geometry2D.get_closest_point_to_segment(player_2d,a,b)))
 			candidates.append({"path":path,"distance":close})
 	if candidates.is_empty():
 		push_warning("No Akurana traffic routes found near the player")
@@ -72,7 +75,26 @@ func _build() -> void:
 		if kind=="van": _van_detail(body)
 		actors.append(body)
 		routes.append(route)
-		travel.append(float(i%4)*9.0)
+		# Initialize vehicles at the closest point along the selected route.
+		# Starting each path at its first OSM node previously put every actor
+		# hundreds of metres away, despite roads passing near the car.
+		var nearest_progress:=0.0
+		var nearest_distance:=INF
+		var accumulated:=0.0
+		var driver_2d:=Vector2(player.global_position.x,player.global_position.z)
+		for segment in range(route.size()-1):
+			var a2:=Vector2(route[segment].x,route[segment].z)
+			var b2:=Vector2(route[segment+1].x,route[segment+1].z)
+			var ab:=b2-a2
+			var length:=ab.length()
+			if length<.01: continue
+			var fraction:=clampf((driver_2d-a2).dot(ab)/(length*length),0.0,1.0)
+			var distance_to_driver:=driver_2d.distance_to(a2+ab*fraction)
+			if distance_to_driver<nearest_distance:
+				nearest_distance=distance_to_driver
+				nearest_progress=accumulated+fraction*length
+			accumulated+=length
+		travel.append(clampf(nearest_progress+float(i%4)*13.0,0.0,maxf(0.0,accumulated-1.0)))
 		speed.append(4.5 if kind=="bus" else (5.5 if kind=="van" else 7.0))
 		kinds.append(kind)
 	for i in range(12):
