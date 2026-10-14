@@ -31,16 +31,23 @@ func _build() -> void:
 	var candidates: Array = []
 	for road in world.mapped_roads:
 		var path: Array=road.get("path",[])
-		if path.size()<3 or float(road.get("width",0))<4.8: continue
+		if path.size()<2 or float(road.get("width",0))<4.8: continue
 		var distance:=0.0
 		for i in range(path.size()-1):
 			distance+=Vector2(float(path[i][0]),float(path[i][1])).distance_to(Vector2(float(path[i+1][0]),float(path[i+1][1])))
-		if distance>75.0: candidates.append(path)
-	if candidates.is_empty(): return
+		if distance>32.0:
+			var close: float=INF
+			for point in path:
+				close=minf(close,Vector2(float(point[0]),float(point[1])).distance_to(Vector2(player.global_position.x,player.global_position.z)))
+			candidates.append({"path":path,"distance":close})
+	if candidates.is_empty():
+		push_warning("No Akurana traffic routes found near the player")
+		return
+	candidates.sort_custom(func(a: Dictionary,b: Dictionary): return float(a.distance)<float(b.distance))
 	var names: Array[String]=["sedan","hatchback","van","bus","lorry","van","sedan","bus","lorry","suv","bus","hatchback"]
 	var count:=mini(12,candidates.size()*2)
 	for i in range(count):
-		var path: Array=candidates[i%candidates.size()]
+		var path: Array=candidates[i%candidates.size()].path
 		var direction:=1 if i%2==0 else -1
 		var route: Array[Vector3]=[]
 		for j in range(path.size()):
@@ -78,6 +85,8 @@ func _build() -> void:
 		person.position=spot
 		walkers.append(person)
 		walker_anchors.append(spot)
+	# Put actors on route immediately; do not leave them at world origin.
+	_update_positions(0.0)
 	set_process(true)
 
 func _bus_detail(body: Node3D) -> void:
@@ -129,6 +138,9 @@ func _build_person(person: Node3D,i: int) -> void:
 
 func _process(delta: float) -> void:
 	if not enabled or not is_instance_valid(player): return
+	_update_positions(delta)
+
+func _update_positions(delta: float) -> void:
 	for i in range(actors.size()):
 		var actor: Node3D=actors[i]
 		var route: Array[Vector3]=routes[i]
@@ -137,7 +149,7 @@ func _process(delta: float) -> void:
 		for k in range(route.size()-1): max_distance+=route[k].distance_to(route[k+1])
 		if max_distance<1: continue
 		var pace: float=speed[i]
-		if actor.global_position.distance_to(player.global_position)<10.0: pace=0.0
+		if delta>0.0 and actor.global_position.distance_to(player.global_position)<10.0: pace=0.0
 		travel[i]=fmod(travel[i]+pace*delta,max_distance)
 		var remaining: float=travel[i]
 		for j in range(route.size()-1):
