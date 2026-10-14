@@ -53,6 +53,11 @@ jobs:
         run: |
           & $env:GODOT_EXE --headless --path az-car-3d --script res://tests/akurana_smoke.gd
           if ($LASTEXITCODE -ne 0) { throw 'Akurana smoke checks failed' }
+      - name: Akurana traffic visibility regression
+        shell: pwsh
+        run: |
+          & $env:GODOT_EXE --headless --path az-car-3d --script res://tests/akurana_traffic.gd
+          if ($LASTEXITCODE -ne 0) { throw 'Akurana traffic visibility regression failed' }
       - name: Full-footprint, collider and hill-driving validation
         shell: pwsh
         run: |
