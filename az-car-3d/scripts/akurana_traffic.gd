@@ -5,7 +5,7 @@ const Coupe = preload("res://scripts/coupe_visual.gd")
 const G = preload("res://scripts/geometry.gd")
 var world: Node3D
 var player: VehicleBody3D
-var actors: Array[Node3D] = []
+var actors: Array[AnimatableBody3D] = []
 var routes: Array = []
 var travel: Array[float] = []
 var speed: Array[float] = []
@@ -23,7 +23,7 @@ func configure(map: Node3D, driver: VehicleBody3D) -> void:
 func set_enabled(value: bool) -> void:
 	enabled=value
 	visible=value
-	set_process(value)
+	set_physics_process(value)
 
 func _build() -> void:
 	if not is_instance_valid(world): return
@@ -65,9 +65,19 @@ func _build() -> void:
 			route.append(Vector3(at.x,world.road_surface_at(at.x,at.y)+0.11,at.y))
 		if route.size()<2: continue
 		var kind:String=names[i%names.size()]
-		var body:=Node3D.new()
+		var body:=AnimatableBody3D.new()
 		body.name="AkuranaTraffic"+str(i)
+		body.collision_layer=2
+		body.collision_mask=3
+		body.sync_to_physics=true
 		add_child(body)
+		var hitbox:=CollisionShape3D.new()
+		var hull:=BoxShape3D.new()
+		# Collider dimensions follow the vehicle's visual envelope.
+		hull.size=Vector3(2.25,2.6,7.6) if kind=="bus" else (Vector3(2.1,2.6,5.2) if kind=="lorry" else (Vector3(2.0,2.2,4.7) if kind=="van" else Vector3(1.92,1.45,4.35)))
+		hitbox.shape=hull
+		hitbox.position.y=hull.size.y*.50
+		body.add_child(hitbox)
 		var colors: Array[Color]=[Color(.82,.84,.82),Color(.16,.32,.48),Color(.70,.18,.18),Color(.85,.72,.25),Color(.31,.37,.38)]
 		Coupe.traffic_model(body,colors[i%colors.size()],"van" if kind=="lorry" else kind)
 		if kind=="bus": _bus_detail(body)
@@ -109,7 +119,7 @@ func _build() -> void:
 		walker_anchors.append(spot)
 	# Put actors on route immediately; do not leave them at world origin.
 	_update_positions(0.0)
-	set_process(true)
+	set_physics_process(true)
 
 func _bus_detail(body: Node3D) -> void:
 	var blue:=G.material("",Color(.12,.27,.65))
@@ -158,13 +168,13 @@ func _build_person(person: Node3D,i: int) -> void:
 		G.box(person,Vector3(side*.13,.44,0),Vector3(.17,.80,.19),pants)
 		G.box(person,Vector3(side*.30,1.16,0),Vector3(.13,.67,.17),skin)
 
-func _process(delta: float) -> void:
+func _physics_process(delta: float) -> void:
 	if not enabled or not is_instance_valid(player): return
 	_update_positions(delta)
 
 func _update_positions(delta: float) -> void:
 	for i in range(actors.size()):
-		var actor: Node3D=actors[i]
+		var actor: AnimatableBody3D=actors[i]
 		var route: Array[Vector3]=routes[i]
 		if route.size()<2: continue
 		var max_distance: float=0.0
