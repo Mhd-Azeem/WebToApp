@@ -22,7 +22,12 @@ func _ready() -> void:
 		if control is OptionButton and control.item_count>0 and control.get_item_text(0).begins_with("Render scale"): control.hide()
 	traffic_toggle.disabled=false
 	traffic_toggle.text="Akurana traffic and pedestrians"
-	traffic_toggle.button_pressed=bool(saved.get_value("driving","traffic",true))
+	# Legacy Akurana versions forcibly persisted driving/traffic=false.
+	# Keep an independent map-specific preference that defaults to ON.
+	traffic_toggle.button_pressed=bool(saved.get_value("driving","akurana_traffic",true))
+	traffic_toggle.toggled.connect(func(value: bool):
+		saved.set_value("driving","akurana_traffic",value)
+		saved.save("user://driving-settings.cfg"))
 	quality_toggle.hide()
 	shadow_toggle.hide()
 	var close: Node=column.get_child(column.get_child_count()-1)
