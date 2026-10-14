@@ -20,6 +20,21 @@ func _test() -> void:
 		push_error("Akurana generated fewer than four traffic vehicles")
 		quit(1)
 		return
+	# Visual meshes alone are insufficient: every AI car must be a
+	# physics body with a solid 3D hitbox the player's car can collide with.
+	for actor in ai.actors:
+		if not actor is AnimatableBody3D or actor.collision_layer & 2 == 0:
+			push_error("Akurana traffic vehicle has no physical collision body")
+			quit(1)
+			return
+		var found_shape:=false
+		for child in actor.get_children():
+			if child is CollisionShape3D and child.shape is BoxShape3D:
+				found_shape=true
+		if not found_shape:
+			push_error("Akurana traffic vehicle missing collision shape")
+			quit(1)
+			return
 	var nearby := 0
 	for actor in ai.actors:
 		if actor.global_position.distance_to(scene.car.global_position) < 280.0: nearby += 1
