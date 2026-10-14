@@ -20,9 +20,9 @@ func _ready() -> void:
 	column.size_flags_horizontal=Control.SIZE_EXPAND_FILL
 	for control in column.get_children():
 		if control is OptionButton and control.item_count>0 and control.get_item_text(0).begins_with("Render scale"): control.hide()
-	traffic_toggle.disabled=true
-	traffic_toggle.text="Mapped traffic AI unavailable"
-	traffic_toggle.button_pressed=false
+	traffic_toggle.disabled=false
+	traffic_toggle.text="Akurana traffic and pedestrians"
+	traffic_toggle.button_pressed=bool(saved.get_value("driving","traffic",true))
 	quality_toggle.hide()
 	shadow_toggle.hide()
 	var close: Node=column.get_child(column.get_child_count()-1)
