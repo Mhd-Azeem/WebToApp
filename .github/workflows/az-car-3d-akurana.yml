@@ -74,6 +74,8 @@ jobs:
         run: godot --headless --path az-car-3d --script res://tests/cockpit_checks.gd
       - name: Akurana geographic scene smoke checks
         run: godot --headless --path az-car-3d --script res://tests/akurana_smoke.gd
+      - name: Akurana traffic visibility regression
+        run: godot --headless --path az-car-3d --script res://tests/akurana_traffic.gd
       - name: Full-footprint and watertight road validation
         run: |
           set -euo pipefail
