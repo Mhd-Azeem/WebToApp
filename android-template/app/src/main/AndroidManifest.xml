@@ -14,7 +14,7 @@
         android:icon="@drawable/app_icon"
         android:theme="@style/Theme.WebToApp"
         android:usesCleartextTraffic="false">
-        <activity android:name="com.canhub.cropper.CropImageActivity" android:theme="@style/Theme.WebToApp" />
+        <activity android:name="com.canhub.cropper.CropImageActivity" android:theme="@style/Theme.WebToApp.Crop" />
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
