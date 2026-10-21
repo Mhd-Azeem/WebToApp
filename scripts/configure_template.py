@@ -18,6 +18,11 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.view.View
+import android.view.WindowManager
+import android.graphics.Color
+import android.os.SystemClock
+import android.database.Cursor
+import android.content.ActivityNotFoundException
 import android.webkit.*
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
@@ -31,15 +36,25 @@ class MainActivity:AppCompatActivity(){
  private val tabs=ArrayList<WebView>()
  private var active=0
  private val home="__WEB_URL__"
+ private val downloads=linkedMapOf<Long,Pair<String,Long>>()
+ private val downloadManager by lazy{getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager}
+ private val uiHandler=android.os.Handler(android.os.Looper.getMainLooper())
  @SuppressLint("SetJavaScriptEnabled")
  override fun onCreate(savedInstanceState:Bundle?){
   super.onCreate(savedInstanceState)
+  window.statusBarColor=Color.rgb(7,22,45)
+  window.navigationBarColor=Color.rgb(7,22,45)
+  window.decorView.systemUiVisibility=0
+  window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN or WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+  val saved=getSharedPreferences("app_downloads",MODE_PRIVATE)
+  saved.all.forEach{(key,value)->key.toLongOrNull()?.let{id->if(value is String)downloads[id]=Pair(value,SystemClock.elapsedRealtime())}}
   val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
-  val bar=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;setBackgroundColor(0xff17243b.toInt())}
-  tabButton=TextView(this).apply{text="1 ▣";textSize=18f;setTextColor(-1);setPadding(24,18,24,18);setOnClickListener{showTabs()}}
-  val menu=TextView(this).apply{text="⋮";textSize=26f;setTextColor(-1);setPadding(28,12,28,12);setOnClickListener{showMenu()}}
+  val bar=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL;setPadding(10,5,10,5);setBackgroundColor(0xff102C58.toInt());minimumHeight=52.dp()}
+  tabButton=TextView(this).apply{text="▣ 1";textSize=17f;setTextColor(-1);setPadding(18,12,18,12);setOnClickListener{showTabs()}}
+  val menu=TextView(this).apply{text="⋮";textSize=27f;setTextColor(-1);setPadding(24,12,24,12);setOnClickListener{showMenu()}}
   bar.addView(tabButton,LinearLayout.LayoutParams(0,-2,1f));bar.addView(menu)
   container=FrameLayout(this)
+  root.setBackgroundColor(0xff08172F.toInt())
   root.addView(bar);root.addView(container,LinearLayout.LayoutParams(-1,0,1f))
   setContentView(root)
   openTab(home,true)
@@ -84,7 +99,9 @@ class MainActivity:AppCompatActivity(){
      .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS,filename)
     request.addRequestHeader("User-Agent",agent?:w.settings.userAgentString)
     CookieManager.getInstance().getCookie(url)?.let{request.addRequestHeader("Cookie",it)}
-    (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+    val id=downloadManager.enqueue(request)
+    downloads[id]=Pair(filename,SystemClock.elapsedRealtime())
+    getSharedPreferences("app_downloads",MODE_PRIVATE).edit().putString(id.toString(),filename).apply()
     Toast.makeText(this,"Download started: $filename",Toast.LENGTH_LONG).show()
    }catch(e:Exception){Toast.makeText(this,"Download failed to start",Toast.LENGTH_LONG).show()}
   }
@@ -100,7 +117,7 @@ class MainActivity:AppCompatActivity(){
   val w=tabs[index];(w.parent as? android.view.ViewGroup)?.removeView(w)
   container.addView(w,FrameLayout.LayoutParams(-1,-1));updateCount()
  }
- private fun updateCount(){tabButton.text="${tabs.size} ▣"}
+ private fun updateCount(){tabButton.text="▣ ${tabs.size}"}
  private fun closeTab(index:Int){
   if(index !in tabs.indices)return
   val w=tabs.removeAt(index)
@@ -128,12 +145,101 @@ class MainActivity:AppCompatActivity(){
   }
   dialog.show()
  }
+ private fun Int.dp()=(this*resources.displayMetrics.density).toInt()
+ private fun pretty(bytes:Long):String=when{
+  bytes<0->"Unknown"
+  bytes<1024->"$bytes B"
+  bytes<1048576->String.format("%.1f KB",bytes/1024.0)
+  bytes<1073741824->String.format("%.1f MB",bytes/1048576.0)
+  else->String.format("%.2f GB",bytes/1073741824.0)
+ }
+ private fun showDownloads(){
+  val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setBackgroundColor(0xff0B1B35.toInt());setPadding(16.dp(),12.dp(),16.dp(),12.dp())}
+  val heading=TextView(this).apply{text="Downloads";textColor=Color.WHITE;textSize=23f;setPadding(6.dp(),4.dp(),6.dp(),12.dp())}
+  val scroll=ScrollView(this)
+  val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
+  scroll.addView(list)
+  root.addView(heading)
+  root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
+  val dialog=AlertDialog.Builder(this).setView(root).setPositiveButton("Done",null).create()
+  var previous=mutableMapOf<Long,Pair<Long,Long>>()
+  val refresh=object:Runnable{
+   override fun run(){
+    if(!dialog.isShowing)return
+    list.removeAllViews()
+    if(downloads.isEmpty()){
+     list.addView(TextView(this@MainActivity).apply{text="No downloads yet";textColor=Color.LTGRAY;textSize=16f;setPadding(12.dp(),28.dp(),12.dp(),28.dp())})
+    }
+    for((id,info) in downloads.toList().asReversed()){
+     val cursor=runCatching{downloadManager.query(DownloadManager.Query().setFilterById(id))}.getOrNull()
+     cursor?.use{c->
+      if(c.moveToFirst()){
+       val status=c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+       val done=c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+       val total=c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+       val now=SystemClock.elapsedRealtime()
+       val old=previous[id]
+       val speed=if(old!=null && now>old.second) ((done-old.first).coerceAtLeast(0)*1000/(now-old.second)) else 0L
+       previous[id]=Pair(done,now)
+       val percent=if(total>0)(done*100/total).toInt().coerceIn(0,100) else 0
+       val state=when(status){
+        DownloadManager.STATUS_SUCCESSFUL->"Completed"
+        DownloadManager.STATUS_FAILED->"Failed"
+        DownloadManager.STATUS_PAUSED->"Paused"
+        DownloadManager.STATUS_PENDING->"Waiting"
+        else->"Downloading"
+       }
+       val eta=if(speed>0&&total>done)" • ~${(total-done)/speed}s left" else ""
+       val card=LinearLayout(this@MainActivity).apply{
+        orientation=LinearLayout.VERTICAL
+        setPadding(16.dp(),14.dp(),16.dp(),14.dp())
+        setBackgroundColor(0xff19345A.toInt())
+       }
+       card.addView(TextView(this@MainActivity).apply{text=info.first;textColor=Color.WHITE;textSize=16f;maxLines=2})
+       card.addView(TextView(this@MainActivity).apply{
+        text="$state • ${pretty(done)} / ${pretty(total)}"
+        textColor=0xffB8CDEA.toInt();textSize=13f
+       })
+       if(status==DownloadManager.STATUS_RUNNING||status==DownloadManager.STATUS_PENDING||status==DownloadManager.STATUS_PAUSED){
+        card.addView(ProgressBar(this@MainActivity,null,android.R.attr.progressBarStyleHorizontal).apply{
+         isIndeterminate=total<=0;progress=percent;max=100
+        })
+        card.addView(TextView(this@MainActivity).apply{
+         text=if(speed>0)"${pretty(speed)}/s$eta" else "Calculating speed…"
+         textColor=0xffB8CDEA.toInt();textSize=12f
+        })
+       }
+       val actions=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.HORIZONTAL}
+       if(status==DownloadManager.STATUS_SUCCESSFUL){
+        actions.addView(Button(this@MainActivity).apply{text="Open";setOnClickListener{
+         val uri=downloadManager.getUriForDownloadedFile(id)
+         if(uri!=null)runCatching{startActivity(Intent(Intent.ACTION_VIEW).apply{setDataAndType(uri,c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_MEDIA_TYPE))?:"*/*");addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)})}.onFailure{Toast.makeText(this@MainActivity,"No app can open this file",Toast.LENGTH_SHORT).show()}
+        }})
+       }
+       actions.addView(Button(this@MainActivity).apply{text="Remove";setOnClickListener{
+        downloadManager.remove(id);downloads.remove(id)
+        getSharedPreferences("app_downloads",MODE_PRIVATE).edit().remove(id.toString()).apply()
+        run()
+       }})
+       card.addView(actions)
+       list.addView(card,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=10.dp()})
+      }
+     }
+    }
+    uiHandler.postDelayed(this,1000)
+   }
+  }
+  dialog.setOnDismissListener{uiHandler.removeCallbacks(refresh)}
+  dialog.show()
+  dialog.window?.setLayout(-1,(resources.displayMetrics.heightPixels*0.83).toInt())
+  refresh.run()
+ }
  private fun showMenu(){
   val choices=arrayOf("Tabs","New tab","Downloads","Refresh","Share","Settings")
   AlertDialog.Builder(this).setItems(choices){_,which->when(which){
    0->showTabs()
    1->openTab(home,true)
-   2->startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS))
+   2->showDownloads()
    3->tabs.getOrNull(active)?.reload()
    4->{val intent=Intent(Intent.ACTION_SEND).apply{type="text/plain";putExtra(Intent.EXTRA_TEXT,tabs.getOrNull(active)?.url?:home)};startActivity(Intent.createChooser(intent,"Share page"))}
    5->AlertDialog.Builder(this).setTitle("Settings").setMessage("Tabs open in the background. Downloads are saved to the Downloads folder.").setPositiveButton("OK",null).show()
