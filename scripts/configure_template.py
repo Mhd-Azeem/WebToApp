@@ -21,6 +21,9 @@ import android.view.View
 import android.view.WindowManager
 import android.graphics.Color
 import android.os.SystemClock
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import android.database.Cursor
 import android.content.ActivityNotFoundException
 import android.webkit.*
@@ -42,6 +45,7 @@ class MainActivity:AppCompatActivity(){
  @SuppressLint("SetJavaScriptEnabled")
  override fun onCreate(savedInstanceState:Bundle?){
   super.onCreate(savedInstanceState)
+  WindowCompat.setDecorFitsSystemWindows(window,false)
   window.statusBarColor=Color.rgb(7,22,45)
   window.navigationBarColor=Color.rgb(7,22,45)
   window.decorView.systemUiVisibility=0
@@ -57,6 +61,11 @@ class MainActivity:AppCompatActivity(){
   root.setBackgroundColor(0xff08172F.toInt())
   root.addView(bar);root.addView(container,LinearLayout.LayoutParams(-1,0,1f))
   setContentView(root)
+  ViewCompat.setOnApplyWindowInsetsListener(root){view,insets->
+   val bars=insets.getInsets(WindowInsetsCompat.Type.systemBars())
+   view.setPadding(bars.left,bars.top,bars.right,bars.bottom)
+   insets
+  }
   openTab(home,true)
   onBackPressedDispatcher.addCallback(this,object:OnBackPressedCallback(true){override fun handleOnBackPressed(){
    val current=tabs.getOrNull(active)
@@ -162,7 +171,7 @@ class MainActivity:AppCompatActivity(){
   root.addView(heading)
   root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
   val dialog=AlertDialog.Builder(this).setView(root).setPositiveButton("Done",null).create()
-  var previous=mutableMapOf<Long,Pair<Long,Long>>()
+  val samples=mutableMapOf<Long,ArrayDeque<Pair<Long,Long>>>()
   val refresh=object:Runnable{
    override fun run(){
     if(!dialog.isShowing)return
@@ -178,9 +187,14 @@ class MainActivity:AppCompatActivity(){
        val done=c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
        val total=c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
        val now=SystemClock.elapsedRealtime()
-       val old=previous[id]
-       val speed=if(old!=null && now>old.second) ((done-old.first).coerceAtLeast(0)*1000/(now-old.second)) else 0L
-       previous[id]=Pair(done,now)
+       val history=samples.getOrPut(id){ArrayDeque<Pair<Long,Long>>()}
+       if(history.isNotEmpty() && done<history.last().first)history.clear()
+       history.addLast(Pair(done,now))
+       while(history.size>2 && now-history.first().second>8000L)history.removeFirst()
+       val oldest=history.first()
+       val elapsed=now-oldest.second
+       val speed=if(status==DownloadManager.STATUS_RUNNING && elapsed>=1000L)
+        ((done-oldest.first).coerceAtLeast(0).toDouble()*1000.0/elapsed).toLong() else 0L
        val percent=if(total>0)(done*100/total).toInt().coerceIn(0,100) else 0
        val state=when(status){
         DownloadManager.STATUS_SUCCESSFUL->"Completed"
