@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
- android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true" android:background="#07162D">
+<ScrollView android:id="@+id/builderRoot" xmlns:android="http://schemas.android.com/apk/res/android"
+ android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true" android:clipToPadding="false" android:background="#07162D">
  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="24dp">
   <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="WebToApp Studio" android:textColor="#F8FAFC" android:textSize="28sp" android:textStyle="bold"/>
   <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:layout_marginBottom="20dp" android:text="Create your Android app in minutes • Website, icon and settings" android:textColor="#AFC3E1" android:textSize="15sp"/>
@@ -23,6 +23,7 @@
   <TextView android:id="@+id/statusText" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="Ready • Choose an icon or use the default" android:textColor="#D6E5FA" android:textSize="14sp"/>
   <Button android:id="@+id/previewButton" android:layout_width="match_parent" android:layout_height="52dp" android:layout_marginTop="18dp" android:text="PREVIEW WEBSITE"/>
   <Button android:id="@+id/githubButton" android:layout_width="match_parent" android:layout_height="52dp" android:layout_marginTop="8dp" android:text="CONNECT / CHANGE GITHUB TOKEN"/>
+  <Button android:id="@+id/repoButton" android:layout_width="match_parent" android:layout_height="52dp" android:layout_marginTop="10dp" android:text="OPEN GITHUB REPOSITORY"/>
   <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:paddingBottom="24dp" android:text="The token is never included in generated APKs. Generated APKs are built by your GitHub Actions workflow." android:textColor="#AFC3E1" android:textSize="12sp"/>
  </LinearLayout>
 </ScrollView>
