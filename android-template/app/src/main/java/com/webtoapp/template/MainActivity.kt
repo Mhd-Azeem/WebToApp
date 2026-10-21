@@ -1,5 +1,13 @@
 package com.webtoapp.template
 
+import android.app.DownloadManager
+import android.content.Context
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.os.Environment
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.Manifest
@@ -51,7 +59,32 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.rgb(7, 22, 45)
+        window.navigationBarColor = Color.rgb(7, 22, 45)
         setContentView(R.layout.activity_main)
+        val root = findViewById<View>(R.id.builderRoot)
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
+        val primaryBlue = Color.rgb(0, 164, 255)
+        listOf(R.id.buildButton, R.id.iconButton, R.id.previewButton, R.id.githubButton, R.id.repoButton).forEach { id ->
+            findViewById<Button>(id).apply {
+                background = GradientDrawable().apply {
+                    cornerRadius = 18f * resources.displayMetrics.density
+                    setColor(if (id == R.id.buildButton) primaryBlue else Color.rgb(13, 65, 115))
+                    setStroke((1.5f * resources.displayMetrics.density).toInt(), primaryBlue)
+                }
+                setTextColor(Color.WHITE)
+                isAllCaps = false
+                elevation = 3f * resources.displayMetrics.density
+            }
+        }
+        findViewById<Button>(R.id.repoButton).setOnClickListener {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/$owner/$repo")))
+        }
 
         val websiteUrl = findViewById<EditText>(R.id.websiteUrl)
         val appName = findViewById<EditText>(R.id.appName)
@@ -180,10 +213,19 @@ class MainActivity : AppCompatActivity() {
                         progress.visibility = View.GONE
                         button.isEnabled = true
                         if (conclusion == "success") {
-                            status.text = "APK ready. Opening download…"
+                            status.text = "APK ready. Starting download…"
                             val encoded = URLEncoder.encode(appName, "UTF-8").replace("+", "%20")
-                            startActivity(Intent(Intent.ACTION_VIEW,
-                                Uri.parse("https://github.com/$owner/$repo/releases/download/generated-latest/$encoded.apk")))
+                            val apkUrl = "https://github.com/$owner/$repo/releases/download/generated-latest/$encoded.apk"
+                            try {
+                                val download = DownloadManager.Request(Uri.parse(apkUrl))
+                                    .setTitle("$appName APK")
+                                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                                    .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "WebToApp-generated.apk")
+                                (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(download)
+                                status.text = "APK downloading. Check notification."
+                            } catch (e: Exception) {
+                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl)))
+                            }
                         } else status.text = "APK build failed. Check GitHub Actions."
                     }
                     return
