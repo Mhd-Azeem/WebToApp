@@ -284,7 +284,7 @@ class MainActivity:AppCompatActivity(){
   val menuView=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(12.dp(),12.dp(),12.dp(),12.dp());setBackgroundColor(0xff102C58.toInt())}
   val popup=AlertDialog.Builder(this).setView(menuView).create()
   choices.forEachIndexed{which,choice->
-   menuView.addView(TextView(this).apply{text=choice;textSize=17f;setTextColor(Color.WHITE);setPadding(20.dp(),15.dp(),20.dp(),15.dp());setOnClickListener{popup.dismiss();when(which){
+   menuView.addView(TextView(this@MainActivity).apply{text=choice;textSize=17f;setTextColor(Color.WHITE);setPadding(20.dp(),15.dp(),20.dp(),15.dp());setOnClickListener{popup.dismiss();when(which){
    0->showTabs()
    1->openTab(home,true)
    2->showDownloads()
