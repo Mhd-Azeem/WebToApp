@@ -36,6 +36,8 @@ import java.util.ArrayList
 class MainActivity:AppCompatActivity(){
  private lateinit var container:FrameLayout
  private lateinit var tabButton:TextView
+ private lateinit var downloadButton:TextView
+ private lateinit var topBar:LinearLayout
  private val tabs=ArrayList<WebView>()
  private var active=0
  private val home="__WEB_URL__"
@@ -54,9 +56,11 @@ class MainActivity:AppCompatActivity(){
   saved.all.forEach{(key,value)->key.toLongOrNull()?.let{id->if(value is String)downloads[id]=Pair(value,SystemClock.elapsedRealtime())}}
   val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
   val bar=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL;setPadding(10,5,10,5);setBackgroundColor(0xff102C58.toInt());minimumHeight=52.dp()}
+  topBar=bar
   tabButton=TextView(this).apply{text="▣ 1";textSize=17f;setTextColor(-1);setPadding(18,12,18,12);setOnClickListener{showTabs()}}
   val menu=TextView(this).apply{text="⋮";textSize=27f;setTextColor(-1);setPadding(24,12,24,12);setOnClickListener{showMenu()}}
-  bar.addView(tabButton,LinearLayout.LayoutParams(0,-2,1f));bar.addView(menu)
+  downloadButton=TextView(this).apply{text="↓";textSize=25f;setTextColor(0xff25B9FF.toInt());setPadding(18,10,18,10);visibility=View.GONE;setOnClickListener{showDownloads()}}
+  bar.addView(tabButton,LinearLayout.LayoutParams(0,-2,1f));bar.addView(downloadButton);bar.addView(menu)
   container=FrameLayout(this)
   root.setBackgroundColor(0xff08172F.toInt())
   root.addView(bar);root.addView(container,LinearLayout.LayoutParams(-1,0,1f))
@@ -67,6 +71,7 @@ class MainActivity:AppCompatActivity(){
    insets
   }
   openTab(home,true)
+  monitorDownloads()
   onBackPressedDispatcher.addCallback(this,object:OnBackPressedCallback(true){override fun handleOnBackPressed(){
    val current=tabs.getOrNull(active)
    if(current?.canGoBack()==true)current.goBack()
@@ -110,6 +115,7 @@ class MainActivity:AppCompatActivity(){
     CookieManager.getInstance().getCookie(url)?.let{request.addRequestHeader("Cookie",it)}
     val id=downloadManager.enqueue(request)
     downloads[id]=Pair(filename,SystemClock.elapsedRealtime())
+    downloadButton.visibility=View.VISIBLE
     getSharedPreferences("app_downloads",MODE_PRIVATE).edit().putString(id.toString(),filename).apply()
     Toast.makeText(this,"Download started: $filename",Toast.LENGTH_LONG).show()
    }catch(e:Exception){Toast.makeText(this,"Download failed to start",Toast.LENGTH_LONG).show()}
@@ -162,6 +168,28 @@ class MainActivity:AppCompatActivity(){
   bytes<1073741824->String.format("%.1f MB",bytes/1048576.0)
   else->String.format("%.2f GB",bytes/1073741824.0)
  }
+ private fun monitorDownloads(){
+  uiHandler.postDelayed(object:Runnable{
+   override fun run(){
+    var activeDownload=false
+    for(id in downloads.keys){
+     runCatching{downloadManager.query(DownloadManager.Query().setFilterById(id))}.getOrNull()?.use{cursor->
+      if(cursor.moveToFirst()){
+       val state=cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+       if(state==DownloadManager.STATUS_RUNNING||state==DownloadManager.STATUS_PENDING||state==DownloadManager.STATUS_PAUSED)activeDownload=true
+      }
+     }
+    }
+    downloadButton.visibility=if(activeDownload)View.VISIBLE else View.GONE
+    uiHandler.postDelayed(this,1500)
+   }
+  },1000)
+ }
+ private fun blueDialog(dialog:AlertDialog){
+  dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+  dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(0xff00AFFF.toInt())
+  dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(0xff00AFFF.toInt())
+ }
  private fun showDownloads(){
   val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setBackgroundColor(0xff0B1B35.toInt());setPadding(16.dp(),12.dp(),16.dp(),12.dp())}
   val heading=TextView(this).apply{text="Downloads";setTextColor(Color.WHITE);textSize=23f;setPadding(6.dp(),4.dp(),6.dp(),12.dp())}
@@ -170,7 +198,9 @@ class MainActivity:AppCompatActivity(){
   scroll.addView(list)
   root.addView(heading)
   root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
-  val dialog=AlertDialog.Builder(this).setView(root).setPositiveButton("Done",null).create()
+  val dialog=AlertDialog.Builder(this,androidx.appcompat.R.style.Theme_AppCompat_Dialog).setView(root).create()
+  heading.text="‹     Downloads"
+  heading.setOnClickListener{dialog.dismiss()}
   val samples=mutableMapOf<Long,ArrayDeque<Pair<Long,Long>>>()
   val refresh=object:Runnable{
    override fun run(){
@@ -245,19 +275,26 @@ class MainActivity:AppCompatActivity(){
   }
   dialog.setOnDismissListener{uiHandler.removeCallbacks(refresh)}
   dialog.show()
-  dialog.window?.setLayout(-1,(resources.displayMetrics.heightPixels*0.83).toInt())
+  dialog.window?.setLayout(-1,-1)
+  dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
   refresh.run()
  }
  private fun showMenu(){
   val choices=arrayOf("Tabs","New tab","Downloads","Refresh","Share","Settings")
-  AlertDialog.Builder(this).setItems(choices){_,which->when(which){
+  val menuView=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(12.dp(),12.dp(),12.dp(),12.dp());setBackgroundColor(0xff102C58.toInt())}
+  val popup=AlertDialog.Builder(this).setView(menuView).create()
+  choices.forEachIndexed{which,choice->
+   menuView.addView(TextView(this).apply{text=choice;textSize=17f;setTextColor(Color.WHITE);setPadding(20.dp(),15.dp(),20.dp(),15.dp());setOnClickListener{popup.dismiss();when(which){
    0->showTabs()
    1->openTab(home,true)
    2->showDownloads()
    3->tabs.getOrNull(active)?.reload()
    4->{val intent=Intent(Intent.ACTION_SEND).apply{type="text/plain";putExtra(Intent.EXTRA_TEXT,tabs.getOrNull(active)?.url?:home)};startActivity(Intent.createChooser(intent,"Share page"))}
    5->AlertDialog.Builder(this).setTitle("Settings").setMessage("Tabs open in the background. Downloads are saved to the Downloads folder.").setPositiveButton("OK",null).show()
-  }}.show()
+  }}})
+  }
+  popup.show()
+  popup.window?.setBackgroundDrawableResource(android.R.color.transparent)
  }
 }
 '''.replace('__WEB_URL__',url))
