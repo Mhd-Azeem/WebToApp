@@ -290,7 +290,7 @@ class MainActivity:AppCompatActivity(){
    2->showDownloads()
    3->tabs.getOrNull(active)?.reload()
    4->{val intent=Intent(Intent.ACTION_SEND).apply{type="text/plain";putExtra(Intent.EXTRA_TEXT,tabs.getOrNull(active)?.url?:home)};startActivity(Intent.createChooser(intent,"Share page"))}
-   5->AlertDialog.Builder(this).setTitle("Settings").setMessage("Tabs open in the background. Downloads are saved to the Downloads folder.").setPositiveButton("OK",null).show()
+   5->AlertDialog.Builder(this@MainActivity).setTitle("Settings").setMessage("Tabs open in the background. Downloads are saved to the Downloads folder.").setPositiveButton("OK",null).show()
   }}})
   }
   popup.show()
