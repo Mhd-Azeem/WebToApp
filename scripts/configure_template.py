@@ -155,7 +155,7 @@ class MainActivity:AppCompatActivity(){
  }
  private fun showDownloads(){
   val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setBackgroundColor(0xff0B1B35.toInt());setPadding(16.dp(),12.dp(),16.dp(),12.dp())}
-  val heading=TextView(this).apply{text="Downloads";textColor=Color.WHITE;textSize=23f;setPadding(6.dp(),4.dp(),6.dp(),12.dp())}
+  val heading=TextView(this).apply{text="Downloads";setTextColor(Color.WHITE);textSize=23f;setPadding(6.dp(),4.dp(),6.dp(),12.dp())}
   val scroll=ScrollView(this)
   val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
   scroll.addView(list)
@@ -168,7 +168,7 @@ class MainActivity:AppCompatActivity(){
     if(!dialog.isShowing)return
     list.removeAllViews()
     if(downloads.isEmpty()){
-     list.addView(TextView(this@MainActivity).apply{text="No downloads yet";textColor=Color.LTGRAY;textSize=16f;setPadding(12.dp(),28.dp(),12.dp(),28.dp())})
+     list.addView(TextView(this@MainActivity).apply{text="No downloads yet";setTextColor(Color.LTGRAY);textSize=16f;setPadding(12.dp(),28.dp(),12.dp(),28.dp())})
     }
     for((id,info) in downloads.toList().asReversed()){
      val cursor=runCatching{downloadManager.query(DownloadManager.Query().setFilterById(id))}.getOrNull()
@@ -195,10 +195,10 @@ class MainActivity:AppCompatActivity(){
         setPadding(16.dp(),14.dp(),16.dp(),14.dp())
         setBackgroundColor(0xff19345A.toInt())
        }
-       card.addView(TextView(this@MainActivity).apply{text=info.first;textColor=Color.WHITE;textSize=16f;maxLines=2})
+       card.addView(TextView(this@MainActivity).apply{text=info.first;setTextColor(Color.WHITE);textSize=16f;maxLines=2})
        card.addView(TextView(this@MainActivity).apply{
         text="$state • ${pretty(done)} / ${pretty(total)}"
-        textColor=0xffB8CDEA.toInt();textSize=13f
+        setTextColor(0xffB8CDEA.toInt());textSize=13f
        })
        if(status==DownloadManager.STATUS_RUNNING||status==DownloadManager.STATUS_PENDING||status==DownloadManager.STATUS_PAUSED){
         card.addView(ProgressBar(this@MainActivity,null,android.R.attr.progressBarStyleHorizontal).apply{
@@ -206,7 +206,7 @@ class MainActivity:AppCompatActivity(){
         })
         card.addView(TextView(this@MainActivity).apply{
          text=if(speed>0)"${pretty(speed)}/s$eta" else "Calculating speed…"
-         textColor=0xffB8CDEA.toInt();textSize=12f
+         setTextColor(0xffB8CDEA.toInt());textSize=12f
         })
        }
        val actions=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.HORIZONTAL}
