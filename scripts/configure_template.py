@@ -219,7 +219,7 @@ class MainActivity:AppCompatActivity(){
        actions.addView(Button(this@MainActivity).apply{text="Remove";setOnClickListener{
         downloadManager.remove(id);downloads.remove(id)
         getSharedPreferences("app_downloads",MODE_PRIVATE).edit().remove(id.toString()).apply()
-        run()
+        dialog.dismiss();showDownloads()
        }})
        card.addView(actions)
        list.addView(card,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=10.dp()})
