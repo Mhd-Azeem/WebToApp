@@ -7,4 +7,11 @@
         <item name="android:navigationBarColor">#000000</item>
         <item name="android:statusBarColor">#000000</item>
     </style>
+    <style name="Theme.WebToApp.Crop" parent="Theme.AppCompat.DayNight.DarkActionBar">
+        <item name="colorPrimary">#123E85</item>
+        <item name="colorPrimaryDark">#071D42</item>
+        <item name="colorAccent">#2563EB</item>
+        <item name="android:windowNoTitle">false</item>
+        <item name="windowActionBar">true</item>
+    </style>
 </resources>
