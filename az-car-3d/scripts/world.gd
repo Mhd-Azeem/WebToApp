@@ -94,6 +94,7 @@ Future coastal district",Vector3(96,5,181),25).rotation.y=PI
 	_batch_geometry(extension)
 	landmark_count = 4
 	_urban_details()
+	_reference_city_details()
 	_batch_geometry()
 
 func _urban_details() -> void:
@@ -182,3 +183,35 @@ func _batch_geometry(source: Node3D = null) -> void:
 					body.reparent(source,true)
 			n.queue_free()
 
+
+# Reference-inspired urban scenery. Geometry is static and kept outside the driving lanes.
+func _reference_city_details() -> void:
+	var red := G.material("",Color(0.83,0.075,0.055))
+	var white := G.material("",Color(0.93,0.94,0.91))
+	var glass := G.material("",Color(0.12,0.23,0.29))
+	var dark := G.material("",Color(0.12,0.13,0.15))
+	var paving := G.material("",Color(0.60,0.61,0.59))
+	var station := Vector3(-48,0,-40)
+	# Compact petrol station in an existing interior city block.
+	G.box(self,station+Vector3(0,0.04,0),Vector3(34,0.08,29),paving,true)
+	G.box(self,station+Vector3(0,4.5,0),Vector3(29,0.55,16),white,true)
+	G.box(self,station+Vector3(0,4.28,8.1),Vector3(29,0.18,0.3),red)
+	for px in [-11.0,11.0]:
+		for pz in [-5.5,5.5]:
+			G.box(self,station+Vector3(px,2.1,pz),Vector3(0.65,4.2,0.65),dark,true)
+	for px in [-8.0,0.0,8.0]:
+		G.box(self,station+Vector3(px,0.85,0),Vector3(1.3,1.7,0.9),red,true)
+		G.box(self,station+Vector3(px,1.25,0.48),Vector3(0.85,0.48,0.07),glass)
+	G.box(self,station+Vector3(0,2.2,-11.5),Vector3(27,4.4,5),white,true)
+	G.box(self,station+Vector3(0,2.1,-8.92),Vector3(22,3.3,0.12),glass)
+	G.label(self,"COLOMBO FUEL",station+Vector3(0,4.65,8.3),28)
+	# Add recessed glass window bands and facade accents to taller buildings.
+	for center in [Vector3(-72,0,40),Vector3(48,0,-120),Vector3(48,0,120)]:
+		for level in range(1,5):
+			for column in range(4):
+				G.box(self,center+Vector3(-7.2+column*4.8,level*3.2+0.6,11.6),Vector3(3.5,1.6,0.08),glass)
+	# Pavement seams and subtle curbs along the central boulevard.
+	for z in range(-140,141,8):
+		if _junction(float(z)): continue
+		for side in [-1.0,1.0]:
+			G.box(self,Vector3(side*10.2,0.22,z),Vector3(0.15,0.06,6.5),white)
