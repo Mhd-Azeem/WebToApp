@@ -20,6 +20,7 @@ import android.os.Environment
 import android.view.View
 import android.view.WindowManager
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.SystemClock
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -55,15 +56,26 @@ class MainActivity:AppCompatActivity(){
   val saved=getSharedPreferences("app_downloads",MODE_PRIVATE)
   saved.all.forEach{(key,value)->key.toLongOrNull()?.let{id->if(value is String)downloads[id]=Pair(value,SystemClock.elapsedRealtime())}}
   val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
-  val bar=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL;setPadding(10,5,10,5);setBackgroundColor(0xff102C58.toInt());minimumHeight=52.dp()}
-  topBar=bar
-  tabButton=TextView(this).apply{text="▣ 1";textSize=17f;setTextColor(-1);setPadding(18,12,18,12);setOnClickListener{showTabs()}}
-  val menu=TextView(this).apply{text="⋮";textSize=27f;setTextColor(-1);setPadding(24,12,24,12);setOnClickListener{showMenu()}}
-  downloadButton=TextView(this).apply{text="↓";textSize=25f;setTextColor(0xff25B9FF.toInt());setPadding(18,10,18,10);visibility=View.GONE;setOnClickListener{showDownloads()}}
-  bar.addView(tabButton,LinearLayout.LayoutParams(0,-2,1f));bar.addView(downloadButton);bar.addView(menu)
+  val overlay=FrameLayout(this)
+  val controls=LinearLayout(this).apply{
+   orientation=LinearLayout.HORIZONTAL
+   gravity=android.view.Gravity.CENTER_VERTICAL
+   setPadding(6.dp(),5.dp(),6.dp(),5.dp())
+   background=rounded(0xff102C58.toInt(),24,0xff2864A8.toInt())
+   elevation=8.dp().toFloat()
+  }
+  topBar=controls
+  tabButton=TextView(this).apply{text="▢ 1";textSize=15f;setTextColor(Color.WHITE);setPadding(12.dp(),8.dp(),12.dp(),8.dp());setOnClickListener{showTabs()}}
+  downloadButton=TextView(this).apply{text="↓";textSize=21f;setTextColor(0xff35C9FF.toInt());setPadding(12.dp(),8.dp(),12.dp(),8.dp());visibility=View.GONE;setOnClickListener{showDownloads()}}
+  val menu=TextView(this).apply{text="⋮";textSize=23f;setTextColor(Color.WHITE);setPadding(12.dp(),8.dp(),12.dp(),8.dp());setOnClickListener{showMenu()}}
+  controls.addView(tabButton);controls.addView(downloadButton);controls.addView(menu)
   container=FrameLayout(this)
   root.setBackgroundColor(0xff08172F.toInt())
-  root.addView(bar);root.addView(container,LinearLayout.LayoutParams(-1,0,1f))
+  overlay.addView(container,FrameLayout.LayoutParams(-1,-1))
+  overlay.addView(controls,FrameLayout.LayoutParams(-2,-2,android.view.Gravity.TOP or android.view.Gravity.END).apply{
+   topMargin=12.dp();rightMargin=12.dp()
+  })
+  root.addView(overlay,LinearLayout.LayoutParams(-1,0,1f))
   setContentView(root)
   ViewCompat.setOnApplyWindowInsetsListener(root){view,insets->
    val bars=insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -143,23 +155,43 @@ class MainActivity:AppCompatActivity(){
   activate(active)
  }
  private fun showTabs(){
+  val panel=LinearLayout(this).apply{
+   orientation=LinearLayout.VERTICAL;setPadding(18.dp(),18.dp(),18.dp(),18.dp())
+   background=rounded(0xff0B1B35.toInt(),24)
+  }
+  val dialog=AlertDialog.Builder(this).setView(panel).create()
+  val header=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL}
+  header.addView(TextView(this).apply{text="Your tabs  ·  ${tabs.size}";textSize=21f;setTextColor(Color.WHITE)},LinearLayout.LayoutParams(0,-2,1f))
+  header.addView(TextView(this).apply{
+   text="+ New";textSize=15f;setTextColor(0xff46C6FF.toInt());setPadding(12.dp(),10.dp(),12.dp(),10.dp())
+   setOnClickListener{openTab(home,true);dialog.dismiss()}
+  })
+  panel.addView(header)
   val scroll=ScrollView(this)
-  val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(20,20,20,20)}
+  val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(0,12.dp(),0,0)}
   scroll.addView(list)
-  val dialog=AlertDialog.Builder(this).setTitle("Tabs (${tabs.size})").setView(scroll).setPositiveButton("New tab"){_,_->openTab(home,true)}.setNegativeButton("Close",null).create()
+  panel.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
   tabs.toList().forEachIndexed{index,w->
-   val row=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;setPadding(12,12,12,12)}
+   val row=LinearLayout(this).apply{
+    orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL
+    setPadding(14.dp(),12.dp(),10.dp(),12.dp())
+    background=rounded(if(index==active)0xff194B80.toInt() else 0xff152F52.toInt(),18)
+   }
    val title=TextView(this).apply{
-    text="${if(index==active)"● " else ""}${w.title?:w.url?:"New tab"}\n${w.url?:""}"
-    maxLines=3;textSize=14f;setPadding(12,24,12,24)
+    text="${if(index==active)"●  " else ""}${w.title?:w.url?:"New tab"}\n${w.url?:""}"
+    setTextColor(Color.WHITE);maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END;textSize=14f
     setOnClickListener{activate(index);dialog.dismiss()}
    }
-   val close=Button(this).apply{text="×";setOnClickListener{closeTab(index);dialog.dismiss();showTabs()}}
+   val close=TextView(this).apply{text="×";textSize=23f;setTextColor(0xffA9C5E9.toInt());setPadding(12.dp(),5.dp(),12.dp(),5.dp());setOnClickListener{closeTab(index);dialog.dismiss();showTabs()}}
    row.addView(title,LinearLayout.LayoutParams(0,-2,1f));row.addView(close)
-   list.addView(row)
+   list.addView(row,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=10.dp()})
   }
   dialog.show()
+  dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+  dialog.window?.setLayout(-1,(resources.displayMetrics.heightPixels*0.78).toInt())
  }
+ private fun rounded(fill:Int,radius:Int,stroke:Int=0):GradientDrawable=
+  GradientDrawable().apply{setColor(fill);cornerRadius=radius.dp().toFloat();if(stroke!=0)setStroke(1.dp(),stroke)}
  private fun Int.dp()=(this*resources.displayMetrics.density).toInt()
  private fun pretty(bytes:Long):String=when{
   bytes<0->"Unknown"
@@ -237,7 +269,7 @@ class MainActivity:AppCompatActivity(){
        val card=LinearLayout(this@MainActivity).apply{
         orientation=LinearLayout.VERTICAL
         setPadding(16.dp(),14.dp(),16.dp(),14.dp())
-        setBackgroundColor(0xff19345A.toInt())
+        background=rounded(0xff19345A.toInt(),18)
        }
        card.addView(TextView(this@MainActivity).apply{text=info.first;setTextColor(Color.WHITE);textSize=16f;maxLines=2})
        card.addView(TextView(this@MainActivity).apply{
@@ -281,7 +313,7 @@ class MainActivity:AppCompatActivity(){
  }
  private fun showMenu(){
   val choices=arrayOf("Tabs","New tab","Downloads","Refresh","Share","Settings")
-  val menuView=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(12.dp(),12.dp(),12.dp(),12.dp());setBackgroundColor(0xff102C58.toInt())}
+  val menuView=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(12.dp(),12.dp(),12.dp(),12.dp());background=rounded(0xff102C58.toInt(),18)}
   val popup=AlertDialog.Builder(this).setView(menuView).create()
   choices.forEachIndexed{which,choice->
    menuView.addView(TextView(this@MainActivity).apply{text=choice;textSize=17f;setTextColor(Color.WHITE);setPadding(20.dp(),15.dp(),20.dp(),15.dp());setOnClickListener{popup.dismiss();when(which){
