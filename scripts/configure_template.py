@@ -22,6 +22,8 @@ import android.view.WindowManager
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.SystemClock
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -82,7 +84,12 @@ class MainActivity:AppCompatActivity(){
    view.setPadding(bars.left,bars.top,bars.right,bars.bottom)
    insets
   }
-  openTab(home,true)
+  val settingsPrefs=getSharedPreferences("web_settings",MODE_PRIVATE)
+  val savedTabs=settingsPrefs.getString("saved_tabs","")?:""
+  if(settingsPrefs.getBoolean("restore_tabs",true)&&savedTabs.isNotBlank()){
+   savedTabs.split("|").filter{it.startsWith("http")}.take(12).forEachIndexed{index,url->openTab(url,index==0)}
+  }
+  if(tabs.isEmpty())openTab(settingsPrefs.getString("homepage",home)?:home,true)
   monitorDownloads()
   onBackPressedDispatcher.addCallback(this,object:OnBackPressedCallback(true){override fun handleOnBackPressed(){
    val current=tabs.getOrNull(active)
@@ -92,9 +99,19 @@ class MainActivity:AppCompatActivity(){
   }})
  }
  @SuppressLint("SetJavaScriptEnabled")
+ override fun onStop(){
+  super.onStop()
+  getSharedPreferences("web_settings",MODE_PRIVATE).edit()
+   .putString("saved_tabs",tabs.mapNotNull{it.url?.takeIf{u->u.startsWith("http")}}.joinToString("|")).apply()
+ }
  private fun createWebView():WebView{
   val w=WebView(this)
   w.settings.apply{javaScriptEnabled=true;domStorageEnabled=true;databaseEnabled=true;setSupportMultipleWindows(true);javaScriptCanOpenWindowsAutomatically=true;useWideViewPort=true;loadWithOverviewMode=true;mediaPlaybackRequiresUserGesture=false}
+  val settingsPrefs=getSharedPreferences("web_settings",MODE_PRIVATE)
+  w.settings.textZoom=settingsPrefs.getInt("text_scale",100)
+  if(settingsPrefs.getBoolean("desktop",false)){
+   w.settings.userAgentString=w.settings.userAgentString.replace("Mobile ","").replace("; wv","")
+  }
   CookieManager.getInstance().apply{setAcceptCookie(true);setAcceptThirdPartyCookies(w,true)}
   w.webViewClient=object:WebViewClient(){
    override fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest):Boolean{
@@ -119,9 +136,19 @@ class MainActivity:AppCompatActivity(){
   }
   w.setDownloadListener{url,agent,disposition,mime,_->
    try{
+    if(getSharedPreferences("web_settings",MODE_PRIVATE).getBoolean("wifi_only",false)){
+     val cm=getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+     val network=cm.getNetworkCapabilities(cm.activeNetwork)
+     if(network?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)!=true){
+      Toast.makeText(this,"Wi-Fi required by download settings",Toast.LENGTH_LONG).show()
+      return@setDownloadListener
+     }
+    }
     val filename=URLUtil.guessFileName(url,disposition,mime)
     val request=DownloadManager.Request(Uri.parse(url)).setTitle(filename).setMimeType(mime)
-     .setDescription("Downloading file").setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+     .setDescription("Downloading file").setNotificationVisibility(
+      if(getSharedPreferences("web_settings",MODE_PRIVATE).getBoolean("download_notifications",true))
+       DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED else DownloadManager.Request.VISIBILITY_HIDDEN)
      .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS,filename)
     request.addRequestHeader("User-Agent",agent?:w.settings.userAgentString)
     CookieManager.getInstance().getCookie(url)?.let{request.addRequestHeader("Cookie",it)}
@@ -149,7 +176,7 @@ class MainActivity:AppCompatActivity(){
   if(index !in tabs.indices)return
   val w=tabs.removeAt(index)
   (w.parent as? android.view.ViewGroup)?.removeView(w);w.destroy()
-  if(tabs.isEmpty()){openTab(home,true);return}
+  if(tabs.isEmpty()){openTab(getSharedPreferences("web_settings",MODE_PRIVATE).getString("homepage",home)?:home,true);return}
   if(index<active)active--
   if(index==active||active>=tabs.size)active=active.coerceAtMost(tabs.lastIndex)
   activate(active)
@@ -164,7 +191,7 @@ class MainActivity:AppCompatActivity(){
   header.addView(TextView(this).apply{text="Your tabs  ·  ${tabs.size}";textSize=21f;setTextColor(Color.WHITE)},LinearLayout.LayoutParams(0,-2,1f))
   header.addView(TextView(this).apply{
    text="+ New";textSize=15f;setTextColor(0xff46C6FF.toInt());setPadding(12.dp(),10.dp(),12.dp(),10.dp())
-   setOnClickListener{openTab(home,true);dialog.dismiss()}
+   setOnClickListener{openTab(getSharedPreferences("web_settings",MODE_PRIVATE).getString("homepage",home)?:home,true);dialog.dismiss()}
   })
   panel.addView(header)
   val scroll=ScrollView(this)
@@ -441,7 +468,7 @@ class MainActivity:AppCompatActivity(){
   choices.forEachIndexed{which,choice->
    menuView.addView(TextView(this@MainActivity).apply{text=choice;textSize=17f;setTextColor(Color.WHITE);setPadding(20.dp(),15.dp(),20.dp(),15.dp());setOnClickListener{popup.dismiss();when(which){
    0->showTabs()
-   1->openTab(home,true)
+   1->openTab(getSharedPreferences("web_settings",MODE_PRIVATE).getString("homepage",home)?:home,true)
    2->showDownloads()
    3->tabs.getOrNull(active)?.reload()
    4->{val intent=Intent(Intent.ACTION_SEND).apply{type="text/plain";putExtra(Intent.EXTRA_TEXT,tabs.getOrNull(active)?.url?:home)};startActivity(Intent.createChooser(intent,"Share page"))}
