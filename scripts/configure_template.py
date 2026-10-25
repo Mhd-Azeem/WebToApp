@@ -41,6 +41,9 @@ class MainActivity:AppCompatActivity(){
  private lateinit var tabButton:TextView
  private lateinit var downloadButton:TextView
  private lateinit var topBar:LinearLayout
+ private lateinit var floatingHandle:TextView
+ private var controlsExpanded=false
+ private val collapseControls=Runnable{setControlsExpanded(false)}
  private val tabs=ArrayList<WebView>()
  private var active=0
  private val home="__WEB_URL__"
@@ -67,16 +70,44 @@ class MainActivity:AppCompatActivity(){
    elevation=8.dp().toFloat()
   }
   topBar=controls
-  tabButton=TextView(this).apply{text="▢ 1";textSize=15f;setTextColor(Color.WHITE);setPadding(12.dp(),8.dp(),12.dp(),8.dp());setOnClickListener{showTabs()}}
-  downloadButton=TextView(this).apply{text="↓";textSize=21f;setTextColor(0xff35C9FF.toInt());setPadding(12.dp(),8.dp(),12.dp(),8.dp());visibility=View.GONE;setOnClickListener{showDownloads()}}
-  val menu=TextView(this).apply{text="⋮";textSize=23f;setTextColor(Color.WHITE);setPadding(12.dp(),8.dp(),12.dp(),8.dp());setOnClickListener{showMenu()}}
+  tabButton=TextView(this).apply{text="▢ 1";textSize=15f;setTextColor(Color.WHITE);setPadding(12.dp(),8.dp(),12.dp(),8.dp());setOnClickListener{setControlsExpanded(false);showTabs()}}
+  downloadButton=TextView(this).apply{text="↓";textSize=21f;setTextColor(0xff35C9FF.toInt());setPadding(12.dp(),8.dp(),12.dp(),8.dp());visibility=View.GONE;setOnClickListener{setControlsExpanded(false);showDownloads()}}
+  val menu=TextView(this).apply{text="⋮";textSize=23f;setTextColor(Color.WHITE);setPadding(12.dp(),8.dp(),12.dp(),8.dp());setOnClickListener{setControlsExpanded(false);showMenu()}}
   controls.addView(tabButton);controls.addView(downloadButton);controls.addView(menu)
+  controls.visibility=View.GONE
+  floatingHandle=TextView(this).apply{
+   text="⋮";textSize=23f;gravity=android.view.Gravity.CENTER
+   setTextColor(Color.WHITE);background=rounded(0xff12325B.toInt(),24,0xff397CC0.toInt())
+   elevation=10.dp().toFloat()
+   setOnClickListener{setControlsExpanded(!controlsExpanded)}
+  }
   container=FrameLayout(this)
   root.setBackgroundColor(0xff08172F.toInt())
   overlay.addView(container,FrameLayout.LayoutParams(-1,-1))
-  overlay.addView(controls,FrameLayout.LayoutParams(-2,-2,android.view.Gravity.TOP or android.view.Gravity.END).apply{
-   topMargin=12.dp();rightMargin=12.dp()
+  overlay.addView(controls,FrameLayout.LayoutParams(-2,-2,android.view.Gravity.BOTTOM or android.view.Gravity.END).apply{
+   bottomMargin=88.dp();rightMargin=14.dp()
   })
+  overlay.addView(floatingHandle,FrameLayout.LayoutParams(46.dp(),46.dp(),android.view.Gravity.BOTTOM or android.view.Gravity.END).apply{
+   bottomMargin=88.dp();rightMargin=14.dp()
+  })
+  var startY=0f
+  var startOffset=0f
+  floatingHandle.setOnTouchListener{view,event->
+   when(event.actionMasked){
+    android.view.MotionEvent.ACTION_DOWN->{startY=event.rawY;startOffset=view.translationY;true}
+    android.view.MotionEvent.ACTION_MOVE->{
+     val delta=event.rawY-startY
+     view.translationY=(startOffset+delta).coerceIn(-overlay.height.toFloat()+160.dp(),0f)
+     controls.translationY=view.translationY
+     true
+    }
+    android.view.MotionEvent.ACTION_UP->{
+     if(kotlin.math.abs(event.rawY-startY)<12.dp())setControlsExpanded(!controlsExpanded)
+     true
+    }
+    else->false
+   }
+  }
   root.addView(overlay,LinearLayout.LayoutParams(-1,0,1f))
   setContentView(root)
   ViewCompat.setOnApplyWindowInsetsListener(root){view,insets->
@@ -180,6 +211,13 @@ class MainActivity:AppCompatActivity(){
   if(index<active)active--
   if(index==active||active>=tabs.size)active=active.coerceAtMost(tabs.lastIndex)
   activate(active)
+ }
+ private fun setControlsExpanded(expanded:Boolean){
+  controlsExpanded=expanded
+  topBar.visibility=if(expanded)View.VISIBLE else View.GONE
+  floatingHandle.visibility=if(expanded)View.GONE else View.VISIBLE
+  uiHandler.removeCallbacks(collapseControls)
+  if(expanded)uiHandler.postDelayed(collapseControls,5000)
  }
  private fun showTabs(){
   val panel=LinearLayout(this).apply{
