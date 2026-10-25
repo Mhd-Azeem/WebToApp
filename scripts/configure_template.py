@@ -351,6 +351,89 @@ class MainActivity:AppCompatActivity(){
   dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
   refresh.run()
  }
+ private fun showSettings(){
+  val prefs=getSharedPreferences("web_settings",MODE_PRIVATE)
+  val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(18.dp(),18.dp(),18.dp(),18.dp());setBackgroundColor(0xff091B35.toInt())}
+  val scroll=ScrollView(this)
+  val body=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
+  scroll.addView(body)
+  val dialog=AlertDialog.Builder(this).setView(panel).create()
+  panel.addView(TextView(this).apply{text="‹    Settings";textSize=24f;setTextColor(Color.WHITE);setPadding(4.dp(),4.dp(),4.dp(),20.dp());setOnClickListener{dialog.dismiss()}})
+  panel.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
+  fun section(title:String){
+   body.addView(TextView(this).apply{text=title;textSize=18f;setTextColor(0xff48C5FF.toInt());setPadding(8.dp(),20.dp(),8.dp(),10.dp())})
+  }
+  fun row(title:String,description:String="",action:()->Unit){
+   body.addView(TextView(this).apply{
+    text=title+if(description.isNotBlank())"\n"+description else ""
+    textSize=15f;setTextColor(Color.WHITE);setPadding(16.dp(),15.dp(),16.dp(),15.dp())
+    background=rounded(0xff16345A.toInt(),16);setOnClickListener{action()}
+   },LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=8.dp()})
+  }
+  fun toggle(label:String,key:String,default:Boolean=false){
+   body.addView(Switch(this).apply{
+    text=label;textSize=15f;setTextColor(Color.WHITE);isChecked=prefs.getBoolean(key,default)
+    setPadding(14.dp(),12.dp(),14.dp(),12.dp());background=rounded(0xff16345A.toInt(),16)
+    setOnCheckedChangeListener{_,checked->prefs.edit().putBoolean(key,checked).apply()}
+   },LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=8.dp()})
+  }
+  section("Appearance")
+  row("Theme","Dark blue / Light / System"){
+   val options=arrayOf("Dark blue","Light","System")
+   AlertDialog.Builder(this).setItems(options){_,i->prefs.edit().putInt("theme",i).apply();Toast.makeText(this,"Theme preference saved",Toast.LENGTH_SHORT).show()}.show()
+  }
+  row("Accent color","Blue / Cyan / Purple"){
+   AlertDialog.Builder(this).setItems(arrayOf("Blue","Cyan","Purple")){_,i->prefs.edit().putInt("accent",i).apply()}.show()
+  }
+  row("Website text size","75% to 150%"){
+   val sizes=intArrayOf(75,90,100,110,125,150)
+   AlertDialog.Builder(this).setItems(sizes.map{"$it%"}.toTypedArray()){_,i->
+    prefs.edit().putInt("text_scale",sizes[i]).apply()
+    tabs.forEach{it.settings.textZoom=sizes[i]}
+   }.show()
+  }
+  section("Browsing")
+  toggle("Restore previous tabs","restore_tabs",true)
+  toggle("Open links in background","background_tabs",true)
+  toggle("Desktop mode","desktop")
+  row("Homepage","Choose URL for new tabs"){
+   val input=EditText(this).apply{setSingleLine();setText(prefs.getString("homepage",home))}
+   AlertDialog.Builder(this).setTitle("Homepage").setView(input).setPositiveButton("Save"){_,_->
+    val u=input.text.toString().trim()
+    if(u.startsWith("https://")||u.startsWith("http://"))prefs.edit().putString("homepage",u).apply()
+   }.setNegativeButton("Cancel",null).show()
+  }
+  section("Downloads & Storage")
+  row("Download history","Active, completed and failed downloads"){dialog.dismiss();showDownloads()}
+  toggle("Wi-Fi only downloads","wifi_only")
+  toggle("Download notifications","download_notifications",true)
+  row("Download location","Android Downloads folder"){}
+  row("Storage usage","Android app storage settings"){
+   startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:$packageName")))
+  }
+  row("Clear download history"){
+   AlertDialog.Builder(this).setTitle("Clear download history?").setPositiveButton("Clear"){_,_->
+    downloads.clear();getSharedPreferences("app_downloads",MODE_PRIVATE).edit().clear().apply()
+   }.setNegativeButton("Cancel",null).show()
+  }
+  section("Privacy & Security")
+  row("Website permissions","Camera, microphone and location"){
+   startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:$packageName")))
+  }
+  row("Clear cookies"){
+   CookieManager.getInstance().removeAllCookies(null);CookieManager.getInstance().flush()
+  }
+  row("Clear browsing history"){tabs.forEach{it.clearHistory()}}
+  row("Clear cache"){tabs.forEach{it.clearCache(true)}}
+  section("About")
+  row("App version",packageManager.getPackageInfo(packageName,0).versionName?:"1.0"){}
+  row("Developer","Made by Mohammed Azeem"){}
+  row("Website",home){startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(home)))}
+  row("Privacy policy","Visit website privacy page"){
+   startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(home.trimEnd('/')+"/privacy")))
+  }
+  dialog.show();dialog.window?.setLayout(-1,-1)
+ }
  private fun showMenu(){
   val choices=arrayOf("Tabs","New tab","Downloads","Refresh","Share","Settings")
   val menuView=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(12.dp(),12.dp(),12.dp(),12.dp());background=rounded(0xff102C58.toInt(),18)}
@@ -362,7 +445,7 @@ class MainActivity:AppCompatActivity(){
    2->showDownloads()
    3->tabs.getOrNull(active)?.reload()
    4->{val intent=Intent(Intent.ACTION_SEND).apply{type="text/plain";putExtra(Intent.EXTRA_TEXT,tabs.getOrNull(active)?.url?:home)};startActivity(Intent.createChooser(intent,"Share page"))}
-   5->AlertDialog.Builder(this@MainActivity).setTitle("Settings").setMessage("Tabs open in the background. Downloads are saved to the Downloads folder.").setPositiveButton("OK",null).show()
+   5->showSettings()
   }}})
   }
   popup.show()
