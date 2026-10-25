@@ -1,6 +1,7 @@
 extends Node3D
 const G = preload("res://scripts/geometry.gd")
 var car: VehicleBody3D
+var engine_audio: Node
 var camera: Camera3D
 var hud: Label
 var cockpit := false
@@ -39,7 +40,7 @@ func _ready() -> void:
 	traffic.set_script(preload("res://scripts/traffic.gd"))
 	traffic.player=car
 	add_child(traffic)
-	var engine_audio := Node.new()
+	engine_audio=Node.new()
 	engine_audio.set_script(preload("res://scripts/engine_audio.gd"))
 	engine_audio.car=car
 	add_child(engine_audio)
@@ -100,6 +101,8 @@ func _hud() -> void:
 	settings.set_script(preload("res://scripts/ui/driving_settings.gd"))
 	layer.add_child(settings)
 	settings.traffic_changed.connect(func(value: bool): traffic.set_enabled(value))
+	engine_audio.set_engine_type(settings.engine_type_selector.selected)
+	settings.engine_type_changed.connect(func(type: int): engine_audio.set_engine_type(type))
 	settings.quality_changed.connect(_apply_quality)
 	settings.visibility_changed.connect(_settings_visibility)
 	settings.throttle_travel_changed.connect(func(value: float):
