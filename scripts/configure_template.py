@@ -35,6 +35,13 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.OnBackPressedCallback
 import java.util.ArrayList
+import java.net.HttpURLConnection
+import java.net.URL
+import java.io.File
+import java.io.RandomAccessFile
+import java.util.concurrent.ConcurrentHashMap
+import android.content.ContentValues
+import android.provider.MediaStore
 
 class MainActivity:AppCompatActivity(){
  private lateinit var container:FrameLayout
@@ -48,6 +55,97 @@ class MainActivity:AppCompatActivity(){
  private var active=0
  private val home="__WEB_URL__"
  private val downloads=linkedMapOf<Long,Pair<String,Long>>()
+ private data class Transfer(val id:Long,val url:String,val filename:String,val mime:String,val agent:String,val cookie:String,
+  @Volatile var state:String="Paused",@Volatile var size:Long=-1,@Volatile var done:Long=0,
+  @Volatile var speed:Long=0,@Volatile var stop:Boolean=false)
+ private val transfers=ConcurrentHashMap<Long,Transfer>()
+ private fun persistTransfer(t:Transfer){
+  getSharedPreferences("resumable_transfers",MODE_PRIVATE).edit().putString(t.id.toString(),
+   listOf(t.url,t.filename,t.mime,t.agent,t.cookie).joinToString("\\u001f")).apply()
+ }
+ private fun restoreTransfers(){
+  getSharedPreferences("resumable_transfers",MODE_PRIVATE).all.forEach{(key,value)->
+   val id=key.toLongOrNull()?:return@forEach
+   val fields=(value as? String)?.split("\\u001f")?:return@forEach
+   if(fields.size!=5)return@forEach
+   val t=Transfer(id,fields[0],fields[1],fields[2],fields[3],fields[4])
+   t.done=File(cacheDir,"transfer_$id.part").let{if(it.exists())it.length() else 0L}
+   transfers[id]=t
+  }
+ }
+ private fun pauseTransfer(t:Transfer){t.stop=true;t.state="Paused"}
+ private fun removeTransfer(t:Transfer){
+  t.stop=true;t.state="Cancelled"
+  transfers.remove(t.id)
+  getSharedPreferences("resumable_transfers",MODE_PRIVATE).edit().remove(t.id.toString()).apply()
+  File(cacheDir,"transfer_${t.id}.part").delete()
+ }
+ private fun startTransfer(t:Transfer){
+  if(t.state=="Downloading"||t.state=="Completed")return
+  t.stop=false;t.state="Downloading"
+  Thread{
+   val file=File(cacheDir,"transfer_${t.id}.part")
+   var conn:HttpURLConnection?=null
+   try{
+    val offset=if(file.exists())file.length() else 0L
+    conn=(URL(t.url).openConnection() as HttpURLConnection).apply{
+     connectTimeout=15000;readTimeout=15000;instanceFollowRedirects=true
+     setRequestProperty("User-Agent",t.agent)
+     if(t.cookie.isNotBlank())setRequestProperty("Cookie",t.cookie)
+     if(offset>0)setRequestProperty("Range","bytes=$offset-")
+    }
+    val code=conn.responseCode
+    if(code!=200&&code!=206)throw java.io.IOException("HTTP $code")
+    if(offset>0&&code!=206)throw java.io.IOException("Server does not support resuming this download")
+    if(code==206){
+     val range=conn.getHeaderField("Content-Range")?:""
+     if(!range.startsWith("bytes $offset-"))throw java.io.IOException("Server returned mismatched range")
+    }
+    val length=conn.contentLengthLong
+    t.size=if(length>=0)offset+length else -1L
+    var lastTime=SystemClock.elapsedRealtime()
+    var lastBytes=offset
+    RandomAccessFile(file,"rw").use{output->
+     output.seek(offset)
+     conn.inputStream.use{input->
+      val buffer=ByteArray(32768)
+      while(!t.stop){
+       val count=input.read(buffer)
+       if(count<0)break
+       output.write(buffer,0,count)
+       t.done+=count
+       val now=SystemClock.elapsedRealtime()
+       if(now-lastTime>=1000){
+        t.speed=((t.done-lastBytes)*1000L/(now-lastTime).coerceAtLeast(1))
+        lastBytes=t.done;lastTime=now
+       }
+      }
+     }
+    }
+    if(t.stop){t.state="Paused";t.speed=0;return@Thread}
+    if(t.size>0&&t.done!=t.size)throw java.io.IOException("Incomplete download")
+    val values=ContentValues().apply{
+     put(MediaStore.Downloads.DISPLAY_NAME,t.filename)
+     put(MediaStore.Downloads.MIME_TYPE,t.mime.ifBlank{"application/octet-stream"})
+     put(MediaStore.Downloads.RELATIVE_PATH,Environment.DIRECTORY_DOWNLOADS)
+     put(MediaStore.Downloads.IS_PENDING,1)
+    }
+    val uri=contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,values)
+     ?:throw java.io.IOException("Cannot create Downloads file")
+    try{
+     contentResolver.openOutputStream(uri)?.use{output->file.inputStream().use{it.copyTo(output)}}
+      ?:throw java.io.IOException("Cannot write Downloads file")
+     contentResolver.update(uri,ContentValues().apply{put(MediaStore.Downloads.IS_PENDING,0)},null,null)
+    }catch(e:Exception){contentResolver.delete(uri,null,null);throw e}
+    file.delete()
+    t.state="Completed";t.speed=0
+   }catch(e:Exception){
+    t.state=if(t.stop)"Paused" else "Failed: ${e.message}"
+    t.speed=0
+   }finally{conn?.disconnect()}
+  }.start()
+ }
+
  private val downloadManager by lazy{getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager}
  private val uiHandler=android.os.Handler(android.os.Looper.getMainLooper())
  @SuppressLint("SetJavaScriptEnabled")
@@ -58,6 +156,7 @@ class MainActivity:AppCompatActivity(){
   window.navigationBarColor=Color.rgb(7,22,45)
   window.decorView.systemUiVisibility=0
   window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN or WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+  restoreTransfers()
   val saved=getSharedPreferences("app_downloads",MODE_PRIVATE)
   saved.all.forEach{(key,value)->key.toLongOrNull()?.let{id->if(value is String)downloads[id]=Pair(value,SystemClock.elapsedRealtime())}}
   val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
@@ -232,17 +331,13 @@ class MainActivity:AppCompatActivity(){
      }
     }
     val filename=URLUtil.guessFileName(url,disposition,mime)
-    val request=DownloadManager.Request(Uri.parse(url)).setTitle(filename).setMimeType(mime)
-     .setDescription("Downloading file").setNotificationVisibility(
-      if(getSharedPreferences("web_settings",MODE_PRIVATE).getBoolean("download_notifications",true))
-       DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED else DownloadManager.Request.VISIBILITY_HIDDEN)
-     .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS,filename)
-    request.addRequestHeader("User-Agent",agent?:w.settings.userAgentString)
-    CookieManager.getInstance().getCookie(url)?.let{request.addRequestHeader("Cookie",it)}
-    val id=downloadManager.enqueue(request)
-    downloads[id]=Pair(filename,SystemClock.elapsedRealtime())
+    val id=System.currentTimeMillis()
+    val transfer=Transfer(id,url,filename,mime?: "",agent?:w.settings.userAgentString,
+     CookieManager.getInstance().getCookie(url)?:"")
+    transfers[id]=transfer
+    persistTransfer(transfer)
+    startTransfer(transfer)
     downloadButton.visibility=View.VISIBLE
-    getSharedPreferences("app_downloads",MODE_PRIVATE).edit().putString(id.toString(),filename).apply()
     Toast.makeText(this,"Download started: $filename",Toast.LENGTH_LONG).show()
    }catch(e:Exception){Toast.makeText(this,"Download failed to start",Toast.LENGTH_LONG).show()}
   }
@@ -330,6 +425,7 @@ class MainActivity:AppCompatActivity(){
   uiHandler.postDelayed(object:Runnable{
    override fun run(){
     var activeDownload=false
+    activeDownload=transfers.values.any{it.state=="Downloading"||it.state=="Paused"}
     for(id in downloads.keys){
      runCatching{downloadManager.query(DownloadManager.Query().setFilterById(id))}.getOrNull()?.use{cursor->
       if(cursor.moveToFirst()){
@@ -381,7 +477,36 @@ class MainActivity:AppCompatActivity(){
    override fun run(){
     if(!dialog.isShowing)return
     list.removeAllViews()
-    if(downloads.isEmpty()){
+    transfers.values.sortedByDescending{it.id}.forEach{t->
+     val card=LinearLayout(this@MainActivity).apply{
+      orientation=LinearLayout.VERTICAL;setPadding(16.dp(),14.dp(),16.dp(),14.dp())
+      background=rounded(0xff19345A.toInt(),18)
+     }
+     card.addView(TextView(this@MainActivity).apply{text=t.filename;setTextColor(Color.WHITE);textSize=16f})
+     val pct=if(t.size>0)(t.done*100/t.size).toInt().coerceIn(0,100) else 0
+     card.addView(TextView(this@MainActivity).apply{
+      text="${t.state} • ${pretty(t.done)} / ${if(t.size>0)pretty(t.size) else "Unknown"}"
+      setTextColor(0xffB8CDEA.toInt());textSize=13f
+     })
+     card.addView(ProgressBar(this@MainActivity,null,android.R.attr.progressBarStyleHorizontal).apply{
+      isIndeterminate=t.size<=0&&t.state=="Downloading";max=100;progress=pct
+     })
+     val eta=if(t.speed>0&&t.size>t.done)" • ${duration((t.size-t.done)/t.speed)} remaining" else ""
+     card.addView(TextView(this@MainActivity).apply{
+      text=if(t.state=="Downloading")"${pretty(t.speed)}/s$eta" else t.state
+      setTextColor(0xff8ED7FF.toInt());textSize=12f
+     })
+     val actions=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.HORIZONTAL}
+     if(t.state=="Downloading"){
+      actions.addView(Button(this@MainActivity).apply{text="Ⅱ Pause";setOnClickListener{pauseTransfer(t)}})
+     }else if(t.state=="Paused"||t.state.startsWith("Failed")){
+      actions.addView(Button(this@MainActivity).apply{text="▶ Resume";setOnClickListener{startTransfer(t)}})
+     }
+     actions.addView(Button(this@MainActivity).apply{text="× Remove";setOnClickListener{removeTransfer(t)}})
+     card.addView(actions)
+     list.addView(card,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=10.dp()})
+    }
+    if(downloads.isEmpty()&&transfers.isEmpty()){
      list.addView(TextView(this@MainActivity).apply{text="No downloads yet";setTextColor(Color.LTGRAY);textSize=16f;setPadding(12.dp(),28.dp(),12.dp(),28.dp())})
     }
     var activeHeader=false
