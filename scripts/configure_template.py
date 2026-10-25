@@ -121,6 +121,13 @@ class MainActivity:AppCompatActivity(){
    val intent=Intent(Intent.ACTION_SEND).apply{type="text/plain";putExtra(Intent.EXTRA_TEXT,tabs.getOrNull(active)?.url?:home)}
    startActivity(Intent.createChooser(intent,"Share page"))
   }
+  val closeRow=LinearLayout(this).apply{gravity=android.view.Gravity.END}
+  closeRow.addView(TextView(this).apply{
+   text="×";textSize=30f;gravity=android.view.Gravity.CENTER
+   setTextColor(Color.WHITE);background=rounded(0xff071D4C.toInt(),50,0xff267DFF.toInt())
+   setOnClickListener{setControlsExpanded(false)}
+  },LinearLayout.LayoutParams(56.dp(),56.dp()))
+  controls.addView(closeRow)
   downloadButton=TextView(this).apply{visibility=View.GONE}
   controls.visibility=View.GONE
   floatingHandle=TextView(this).apply{
