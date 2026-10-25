@@ -2,8 +2,10 @@ extends PanelContainer
 signal traffic_changed(enabled: bool)
 signal quality_changed(low: bool)
 signal transmission_changed(mode: int)
+signal engine_type_changed(type: int)
 signal throttle_travel_changed(value: float)
 var transmission_selector: OptionButton
+var engine_type_selector: OptionButton
 var traffic_toggle: CheckButton
 var quality_toggle: CheckButton
 var shadow_toggle: CheckButton
@@ -45,6 +47,14 @@ func _ready() -> void:
 	transmission_selector.add_item("Automatic transmission",1)
 	transmission_selector.custom_minimum_size=Vector2(300,52)
 	column.add_child(transmission_selector)
+	engine_type_selector=OptionButton.new()
+	engine_type_selector.add_item("Petrol engine",0)
+	engine_type_selector.add_item("Diesel engine",1)
+	engine_type_selector.custom_minimum_size=Vector2(300,52)
+	column.add_child(engine_type_selector)
+	engine_type_selector.item_selected.connect(func(index: int):
+		_save("engine_type",index)
+		engine_type_changed.emit(index))
 	var sensitivity_label := Label.new()
 	sensitivity_label.text="Accelerator drag distance"
 	column.add_child(sensitivity_label)
@@ -76,6 +86,7 @@ func _ready() -> void:
 	hint.add_theme_font_size_override("font_size",14)
 	column.add_child(hint)
 	saved.load("user://driving-settings.cfg")
+	engine_type_selector.select(clampi(int(saved.get_value("driving","engine_type",0)),0,1))
 	shadow_toggle.button_pressed=saved.get_value("driving","shadows",false)
 	throttle_travel=saved.get_value("driving","throttle_travel",96.0)
 	sensitivity.value=throttle_travel
