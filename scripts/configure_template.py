@@ -193,6 +193,11 @@ class MainActivity:AppCompatActivity(){
  private fun rounded(fill:Int,radius:Int,stroke:Int=0):GradientDrawable=
   GradientDrawable().apply{setColor(fill);cornerRadius=radius.dp().toFloat();if(stroke!=0)setStroke(1.dp(),stroke)}
  private fun Int.dp()=(this*resources.displayMetrics.density).toInt()
+ private fun duration(seconds:Long):String{
+  val safe=seconds.coerceAtLeast(0)
+  return if(safe>=3600L) String.format(java.util.Locale.US,"%d:%02d:%02d",safe/3600,(safe/60)%60,safe%60)
+   else String.format(java.util.Locale.US,"%d:%02d",safe/60,safe%60)
+ }
  private fun pretty(bytes:Long):String=when{
   bytes<0->"Unknown"
   bytes<1024->"$bytes B"
@@ -229,6 +234,23 @@ class MainActivity:AppCompatActivity(){
   val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
   scroll.addView(list)
   root.addView(heading)
+  val historyActions=TextView(this).apply{
+   text="History  ·  Clear completed"
+   setTextColor(0xff58C7FF.toInt());textSize=14f
+   setPadding(8.dp(),8.dp(),8.dp(),12.dp())
+   setOnClickListener{
+    val finished=downloads.keys.filter{id->
+     runCatching{downloadManager.query(DownloadManager.Query().setFilterById(id))}.getOrNull()?.use{cursor->
+      if(!cursor.moveToFirst())true else {
+       val state=cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+       state==DownloadManager.STATUS_SUCCESSFUL||state==DownloadManager.STATUS_FAILED
+      }
+     }?:true
+    }
+    finished.forEach{id->downloads.remove(id);getSharedPreferences("app_downloads",MODE_PRIVATE).edit().remove(id.toString()).apply()}
+   }
+  }
+  root.addView(historyActions)
   root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
   val dialog=AlertDialog.Builder(this,androidx.appcompat.R.style.Theme_AppCompat_Dialog).setView(root).create()
   heading.text="‹     Downloads"
@@ -241,7 +263,17 @@ class MainActivity:AppCompatActivity(){
     if(downloads.isEmpty()){
      list.addView(TextView(this@MainActivity).apply{text="No downloads yet";setTextColor(Color.LTGRAY);textSize=16f;setPadding(12.dp(),28.dp(),12.dp(),28.dp())})
     }
-    for((id,info) in downloads.toList().asReversed()){
+    var activeHeader=false
+    var historyHeader=false
+    val ordered=downloads.toList().asReversed().sortedBy{(id,_)->
+     runCatching{downloadManager.query(DownloadManager.Query().setFilterById(id))}.getOrNull()?.use{cursor->
+      if(!cursor.moveToFirst())1 else {
+       val state=cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+       if(state==DownloadManager.STATUS_SUCCESSFUL||state==DownloadManager.STATUS_FAILED)1 else 0
+      }
+     }?:1
+    }
+    for((id,info) in ordered){
      val cursor=runCatching{downloadManager.query(DownloadManager.Query().setFilterById(id))}.getOrNull()
      cursor?.use{c->
       if(c.moveToFirst()){
@@ -265,7 +297,15 @@ class MainActivity:AppCompatActivity(){
         DownloadManager.STATUS_PENDING->"Waiting"
         else->"Downloading"
        }
-       val eta=if(speed>0&&total>done)" • ~${(total-done)/speed}s left" else ""
+       val eta=if(speed>0&&total>done)" • ~${duration((total-done)/speed)} remaining" else ""
+       val isHistory=status==DownloadManager.STATUS_SUCCESSFUL||status==DownloadManager.STATUS_FAILED
+       if(isHistory&&!historyHeader){
+        historyHeader=true
+        list.addView(TextView(this@MainActivity).apply{text="HISTORY";textSize=13f;setTextColor(0xff58C7FF.toInt());setPadding(8.dp(),16.dp(),8.dp(),10.dp())})
+       }else if(!isHistory&&!activeHeader){
+        activeHeader=true
+        list.addView(TextView(this@MainActivity).apply{text="ACTIVE DOWNLOADS";textSize=13f;setTextColor(0xff58C7FF.toInt());setPadding(8.dp(),10.dp(),8.dp(),10.dp())})
+       }
        val card=LinearLayout(this@MainActivity).apply{
         orientation=LinearLayout.VERTICAL
         setPadding(16.dp(),14.dp(),16.dp(),14.dp())
