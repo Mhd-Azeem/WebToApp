@@ -63,32 +63,81 @@ class MainActivity:AppCompatActivity(){
   val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
   val overlay=FrameLayout(this)
   val controls=LinearLayout(this).apply{
-   orientation=LinearLayout.HORIZONTAL
-   gravity=android.view.Gravity.CENTER_VERTICAL
-   setPadding(6.dp(),5.dp(),6.dp(),5.dp())
-   background=rounded(0xff102C58.toInt(),24,0xff2864A8.toInt())
-   elevation=8.dp().toFloat()
+   orientation=LinearLayout.VERTICAL
+   setPadding(16.dp(),18.dp(),16.dp(),18.dp())
+   background=rounded(0xff07182F.toInt(),30,0xff24538B.toInt())
+   elevation=16.dp().toFloat()
   }
   topBar=controls
-  tabButton=TextView(this).apply{text="▢ 1";textSize=15f;setTextColor(Color.WHITE);setPadding(12.dp(),8.dp(),12.dp(),8.dp());setOnClickListener{setControlsExpanded(false);showTabs()}}
-  downloadButton=TextView(this).apply{text="↓";textSize=21f;setTextColor(0xff35C9FF.toInt());setPadding(12.dp(),8.dp(),12.dp(),8.dp());visibility=View.GONE;setOnClickListener{setControlsExpanded(false);showDownloads()}}
-  val menu=TextView(this).apply{text="⋮";textSize=23f;setTextColor(Color.WHITE);setPadding(12.dp(),8.dp(),12.dp(),8.dp());setOnClickListener{setControlsExpanded(false);showMenu()}}
-  controls.addView(tabButton);controls.addView(downloadButton);controls.addView(menu)
+  val icons=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER}
+  fun icon(symbol:String,label:String,action:()->Unit):LinearLayout{
+   val item=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;gravity=android.view.Gravity.CENTER;setPadding(5.dp(),0,5.dp(),0)}
+   item.addView(TextView(this).apply{
+    text=symbol;textSize=27f;gravity=android.view.Gravity.CENTER
+    setTextColor(Color.WHITE);background=rounded(0xff10447C.toInt(),17)
+    layoutParams=LinearLayout.LayoutParams(62.dp(),62.dp())
+    setOnClickListener{setControlsExpanded(false);action()}
+   })
+   item.addView(TextView(this).apply{
+    text=label;textSize=12f;gravity=android.view.Gravity.CENTER
+    setTextColor(0xffD6E8FF.toInt());setPadding(0,8.dp(),0,0)
+   })
+   return item
+  }
+  tabButton=TextView(this).apply{text="▢";textSize=25f;setTextColor(Color.WHITE)}
+  icons.addView(icon("▢","Tabs"){showTabs()})
+  icons.addView(icon("↓","Downloads"){showDownloads()})
+  icons.addView(icon("⚙","Settings"){showSettings()})
+  controls.addView(icons)
+  fun actionRow(symbol:String,title:String,action:()->Unit){
+   val row=LinearLayout(this).apply{
+    orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL
+    setPadding(14.dp(),12.dp(),14.dp(),12.dp())
+    background=rounded(0xff102B4C.toInt(),14)
+    setOnClickListener{setControlsExpanded(false);action()}
+   }
+   row.addView(TextView(this).apply{text=symbol;textSize=23f;setTextColor(0xff79C7FF.toInt())},LinearLayout.LayoutParams(42.dp(),-2))
+   row.addView(TextView(this).apply{text=title;textSize=15f;setTextColor(Color.WHITE)},LinearLayout.LayoutParams(0,-2,1f))
+   controls.addView(row,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=5.dp()})
+  }
+  actionRow("⌂","New Tab"){openTab(getSharedPreferences("web_settings",MODE_PRIVATE).getString("homepage",home)?:home,true)}
+  actionRow("↻","Refresh"){tabs.getOrNull(active)?.reload()}
+  actionRow("▣","Desktop Mode"){
+   val p=getSharedPreferences("web_settings",MODE_PRIVATE)
+   val next=!p.getBoolean("desktop",false)
+   p.edit().putBoolean("desktop",next).apply()
+   tabs.forEach{w->
+    val ua=WebSettings.getDefaultUserAgent(this)
+    w.settings.userAgentString=if(next)ua.replace("Mobile ","").replace("; wv","") else ua
+   }
+   tabs.getOrNull(active)?.reload()
+  }
+  actionRow("⛶","Fullscreen"){
+   val flags=window.decorView.systemUiVisibility
+   val full=flags and View.SYSTEM_UI_FLAG_FULLSCREEN!=0
+   window.decorView.systemUiVisibility=if(full)0 else (View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
+  }
+  actionRow("↗","Share"){
+   val intent=Intent(Intent.ACTION_SEND).apply{type="text/plain";putExtra(Intent.EXTRA_TEXT,tabs.getOrNull(active)?.url?:home)}
+   startActivity(Intent.createChooser(intent,"Share page"))
+  }
+  downloadButton=TextView(this).apply{visibility=View.GONE}
   controls.visibility=View.GONE
   floatingHandle=TextView(this).apply{
-   text="⋮";textSize=23f;gravity=android.view.Gravity.CENTER
-   setTextColor(Color.WHITE);background=rounded(0xff12325B.toInt(),24,0xff397CC0.toInt())
-   elevation=10.dp().toFloat()
+   text="▦";textSize=27f;gravity=android.view.Gravity.CENTER
+   setTextColor(Color.WHITE)
+   background=rounded(0xff061C45.toInt(),50,0xff267DFF.toInt())
+   elevation=16.dp().toFloat()
    setOnClickListener{setControlsExpanded(!controlsExpanded)}
   }
   container=FrameLayout(this)
   root.setBackgroundColor(0xff08172F.toInt())
   overlay.addView(container,FrameLayout.LayoutParams(-1,-1))
-  overlay.addView(controls,FrameLayout.LayoutParams(-2,-2,android.view.Gravity.BOTTOM or android.view.Gravity.END).apply{
-   bottomMargin=88.dp();rightMargin=14.dp()
+  overlay.addView(controls,FrameLayout.LayoutParams(280.dp(),-2,android.view.Gravity.BOTTOM or android.view.Gravity.END).apply{
+   bottomMargin=92.dp();rightMargin=14.dp()
   })
-  overlay.addView(floatingHandle,FrameLayout.LayoutParams(46.dp(),46.dp(),android.view.Gravity.BOTTOM or android.view.Gravity.END).apply{
-   bottomMargin=88.dp();rightMargin=14.dp()
+  overlay.addView(floatingHandle,FrameLayout.LayoutParams(64.dp(),64.dp(),android.view.Gravity.BOTTOM or android.view.Gravity.END).apply{
+   bottomMargin=92.dp();rightMargin=14.dp()
   })
   var startY=0f
   var startOffset=0f
@@ -202,7 +251,7 @@ class MainActivity:AppCompatActivity(){
   val w=tabs[index];(w.parent as? android.view.ViewGroup)?.removeView(w)
   container.addView(w,FrameLayout.LayoutParams(-1,-1));updateCount()
  }
- private fun updateCount(){tabButton.text="▣ ${tabs.size}"}
+ private fun updateCount(){tabButton.text="▢ ${tabs.size}"}
  private fun closeTab(index:Int){
   if(index !in tabs.indices)return
   val w=tabs.removeAt(index)
@@ -499,23 +548,7 @@ class MainActivity:AppCompatActivity(){
   }
   dialog.show();dialog.window?.setLayout(-1,-1)
  }
- private fun showMenu(){
-  val choices=arrayOf("Tabs","New tab","Downloads","Refresh","Share","Settings")
-  val menuView=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(12.dp(),12.dp(),12.dp(),12.dp());background=rounded(0xff102C58.toInt(),18)}
-  val popup=AlertDialog.Builder(this).setView(menuView).create()
-  choices.forEachIndexed{which,choice->
-   menuView.addView(TextView(this@MainActivity).apply{text=choice;textSize=17f;setTextColor(Color.WHITE);setPadding(20.dp(),15.dp(),20.dp(),15.dp());setOnClickListener{popup.dismiss();when(which){
-   0->showTabs()
-   1->openTab(getSharedPreferences("web_settings",MODE_PRIVATE).getString("homepage",home)?:home,true)
-   2->showDownloads()
-   3->tabs.getOrNull(active)?.reload()
-   4->{val intent=Intent(Intent.ACTION_SEND).apply{type="text/plain";putExtra(Intent.EXTRA_TEXT,tabs.getOrNull(active)?.url?:home)};startActivity(Intent.createChooser(intent,"Share page"))}
-   5->showSettings()
-  }}})
-  }
-  popup.show()
-  popup.window?.setBackgroundDrawableResource(android.R.color.transparent)
- }
+
 }
 '''.replace('__WEB_URL__',url))
 layout.write_text('''<?xml version="1.0" encoding="utf-8"?><androidx.swiperefreshlayout.widget.SwipeRefreshLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/swipeRefresh" android:layout_width="match_parent" android:layout_height="match_parent"><WebView android:id="@+id/webView" android:layout_width="match_parent" android:layout_height="match_parent" /></androidx.swiperefreshlayout.widget.SwipeRefreshLayout>''')
