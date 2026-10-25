@@ -19,6 +19,9 @@ var last_shutdown := 0
 var frequency := 0.0
 var audible_rpm := 800.0
 var engine_mix := 0.0
+var engine_type := 0 # 0 petrol, 1 diesel
+func set_engine_type(value: int) -> void:
+	engine_type=clampi(value,0,1)
 # Boost perceived engine loudness while limiting peaks from simultaneous layers.
 const ENGINE_GAIN = 3.2
 const MASTER_HEADROOM = 0.96
@@ -132,7 +135,10 @@ func _process(delta: float) -> void:
 		elif audible_rpm>=references[i] and i+1<layers.size(): weight=1-clampf((audible_rpm-references[i])/(references[i+1]-references[i]),0,1)
 		elif i>0 and audible_rpm<=references[i]: weight=clampf((audible_rpm-references[i-1])/(references[i]-references[i-1]),0,1)
 		layer_weights[i]=weight
-		layers[i].pitch_scale=clampf(audible_rpm/references[i],0.25,4)
+		layers[i].pitch_scale=clampf(audible_rpm/references[i]*(0.80 if engine_type==1 else 1.0),0.25,4)
+		# Diesel emphasizes lower harmonics and a rougher idle; petrol revs brighter.
+		var tone_gain := (1.20 if i<2 else 0.65) if engine_type==1 else (0.78 if i<2 else 1.12)
+		weight*=tone_gain
 		_volume(layers[i],weight*engine_mix*ENGINE_GAIN,delta,35 if e.ignition_cut else 14)
 	_volume(starter,0.75 if e.state==1 else 0.0,delta)
 	starter.pitch_scale=clampf(maxf(150,e.rpm)/400,0.5,1.7)
@@ -153,7 +159,7 @@ func _process(delta: float) -> void:
 	last_ignition=e.ignition_serial
 	var speed := car.linear_velocity.length()
 	var road := clampf(speed/45,0,1) if car.wheel_physics.grounded else 0.0
-	_volume(noises.rolling,road*0.24,delta)
+	_volume(noises.rolling,road*(0.31 if engine_type==1 else 0.24),delta)
 	noises.rolling.pitch_scale=clampf(speed/16,0.5,2.0)
 	_volume(noises.wind,pow(clampf(speed/65,0,1),1.7)*0.10,delta)
 	_volume(noises.brake,0.0,delta) # Remove sharp brake hiss/squeal
