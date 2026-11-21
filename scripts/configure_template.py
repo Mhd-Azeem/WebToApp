@@ -53,6 +53,9 @@ class MainActivity:AppCompatActivity(){
  private lateinit var floatingHandle:TextView
  private lateinit var floatingDock:LinearLayout
  private lateinit var currentUrlLabel:TextView
+ private lateinit var addressBarView:LinearLayout
+ private var chromeVisible=true
+ private var chromeAnimator:android.animation.ValueAnimator?=null
  private var dockExpanded=true
  private var controlsExpanded=false
  private val collapseControls=Runnable{setControlsExpanded(false)}
@@ -63,93 +66,60 @@ class MainActivity:AppCompatActivity(){
  private data class VideoCandidate(val url:String,val title:String,val mime:String)
  private data class Transfer(val id:Long,val url:String,val filename:String,val mime:String,val agent:String,val cookie:String,
   @Volatile var state:String="Paused",@Volatile var size:Long=-1,@Volatile var done:Long=0,
-  @Volatile var speed:Long=0,@Volatile var stop:Boolean=false)
+  @Volatile var speed:Long=0,@Volatile var stop:Boolean=false,@Volatile var uri:String="")
  private val transfers=ConcurrentHashMap<Long,Transfer>()
  private fun persistTransfer(t:Transfer){
   getSharedPreferences("resumable_transfers",MODE_PRIVATE).edit().putString(t.id.toString(),
    listOf(t.url,t.filename,t.mime,t.agent,t.cookie).joinToString("\\u001f")).apply()
  }
- private fun restoreTransfers(){
-  getSharedPreferences("resumable_transfers",MODE_PRIVATE).all.forEach{(key,value)->
-   val id=key.toLongOrNull()?:return@forEach
-   val fields=(value as? String)?.split("\\u001f")?:return@forEach
-   if(fields.size!=5)return@forEach
-   val t=Transfer(id,fields[0],fields[1],fields[2],fields[3],fields[4])
-   t.done=File(cacheDir,"transfer_$id.part").let{if(it.exists())it.length() else 0L}
-   transfers[id]=t
+ // The foreground service writes progress to persistent preferences. UI only observes it.
+ private fun refreshTransfers(){
+  val metadata=getSharedPreferences("resumable_transfers",MODE_PRIVATE).all
+  val progress=getSharedPreferences("transfer_status",MODE_PRIVATE)
+  for((key,value) in metadata){
+   val id=key.toLongOrNull()?:continue
+   val fields=(value as? String)?.split(31.toChar())?:continue
+   if(fields.size!=5)continue
+   val t=transfers[id]?:Transfer(id,fields[0],fields[1],fields[2],fields[3],fields[4]).also{transfers[id]=it}
+   val status=progress.getString(key,null)
+   val info=try{org.json.JSONObject(status?:"{}")}catch(_:Exception){org.json.JSONObject()}
+   t.done=info.optLong("done",File(cacheDir,"transfer_" + id + ".part").length())
+   t.size=info.optLong("size",-1)
+   t.speed=info.optLong("speed",0)
+   t.uri=info.optString("uri","")
+   t.state=info.optString("state","Paused")
+  }
+  transfers.keys.toList().filter{!metadata.containsKey(it.toString())}.forEach{transfers.remove(it)}
+ }
+ private fun restoreTransfers(){refreshTransfers()}
+ private fun sendTransferAction(action:String,id:Long,foreground:Boolean=false){
+  val intent=Intent(this,DownloadService::class.java).apply{
+   this.action=action;putExtra(DownloadService.EXTRA_ID,id)
+  }
+  try{
+   if(foreground)androidx.core.content.ContextCompat.startForegroundService(this,intent)
+   else startService(intent)
+  }catch(e:Exception){
+   transfers[id]?.state="Failed: " + (e.message?:"cannot start background service")
+   Toast.makeText(this,"Download service error: " + e.message,Toast.LENGTH_LONG).show()
   }
  }
- private fun pauseTransfer(t:Transfer){t.stop=true;t.state="Paused"}
+ private fun pauseTransfer(t:Transfer){
+  t.state="Paused"
+  sendTransferAction(DownloadService.ACTION_PAUSE,t.id)
+ }
  private fun removeTransfer(t:Transfer){
-  t.stop=true;t.state="Cancelled"
   transfers.remove(t.id)
-  getSharedPreferences("resumable_transfers",MODE_PRIVATE).edit().remove(t.id.toString()).apply()
-  File(cacheDir,"transfer_${t.id}.part").delete()
+  sendTransferAction(DownloadService.ACTION_REMOVE,t.id)
  }
  private fun startTransfer(t:Transfer){
   if(t.state=="Downloading"||t.state=="Completed")return
-  t.stop=false;t.state="Downloading"
-  Thread{
-   val file=File(cacheDir,"transfer_${t.id}.part")
-   var conn:HttpURLConnection?=null
-   try{
-    val offset=if(file.exists())file.length() else 0L
-    conn=(URL(t.url).openConnection() as HttpURLConnection).apply{
-     connectTimeout=15000;readTimeout=15000;instanceFollowRedirects=true
-     setRequestProperty("User-Agent",t.agent)
-     if(t.cookie.isNotBlank())setRequestProperty("Cookie",t.cookie)
-     if(offset>0)setRequestProperty("Range","bytes=$offset-")
-    }
-    val code=conn.responseCode
-    if(code!=200&&code!=206)throw java.io.IOException("HTTP $code")
-    if(offset>0&&code!=206)throw java.io.IOException("Server does not support resuming this download")
-    if(code==206){
-     val range=conn.getHeaderField("Content-Range")?:""
-     if(!range.startsWith("bytes $offset-"))throw java.io.IOException("Server returned mismatched range")
-    }
-    val length=conn.contentLengthLong
-    t.size=if(length>=0)offset+length else -1L
-    var lastTime=SystemClock.elapsedRealtime()
-    var lastBytes=offset
-    RandomAccessFile(file,"rw").use{output->
-     output.seek(offset)
-     conn.inputStream.use{input->
-      val buffer=ByteArray(32768)
-      while(!t.stop){
-       val count=input.read(buffer)
-       if(count<0)break
-       output.write(buffer,0,count)
-       t.done+=count
-       val now=SystemClock.elapsedRealtime()
-       if(now-lastTime>=1000){
-        t.speed=((t.done-lastBytes)*1000L/(now-lastTime).coerceAtLeast(1))
-        lastBytes=t.done;lastTime=now
-       }
-      }
-     }
-    }
-    if(t.stop){t.state="Paused";t.speed=0;return@Thread}
-    if(t.size>0&&t.done!=t.size)throw java.io.IOException("Incomplete download")
-    val values=ContentValues().apply{
-     put(MediaStore.Downloads.DISPLAY_NAME,t.filename)
-     put(MediaStore.Downloads.MIME_TYPE,t.mime.ifBlank{"application/octet-stream"})
-     put(MediaStore.Downloads.RELATIVE_PATH,Environment.DIRECTORY_DOWNLOADS)
-     put(MediaStore.Downloads.IS_PENDING,1)
-    }
-    val uri=contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,values)
-     ?:throw java.io.IOException("Cannot create Downloads file")
-    try{
-     contentResolver.openOutputStream(uri)?.use{output->file.inputStream().use{it.copyTo(output)}}
-      ?:throw java.io.IOException("Cannot write Downloads file")
-     contentResolver.update(uri,ContentValues().apply{put(MediaStore.Downloads.IS_PENDING,0)},null,null)
-    }catch(e:Exception){contentResolver.delete(uri,null,null);throw e}
-    file.delete()
-    t.state="Completed";t.speed=0
-   }catch(e:Exception){
-    t.state=if(t.stop)"Paused" else "Failed: ${e.message}"
-    t.speed=0
-   }finally{conn?.disconnect()}
-  }.start()
+  if(android.os.Build.VERSION.SDK_INT>=33 &&
+      checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
+   requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),2602)
+  }
+  t.state="Downloading"
+  sendTransferAction(DownloadService.ACTION_START,t.id,true)
  }
 
  private val downloadManager by lazy{getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager}
@@ -205,6 +175,7 @@ class MainActivity:AppCompatActivity(){
   }
   addressBar.addView(addressMenu,LinearLayout.LayoutParams(38.dp(),44.dp()))
   root.addView(addressBar,LinearLayout.LayoutParams(-1,56.dp()))
+  addressBarView=addressBar
 
   val overlay=FrameLayout(this)
   container=FrameLayout(this)
@@ -364,10 +335,25 @@ class MainActivity:AppCompatActivity(){
    w.settings.userAgentString=w.settings.userAgentString.replace("Mobile ","").replace("; wv","")
   }
   CookieManager.getInstance().apply{setAcceptCookie(true);setAcceptThirdPartyCookies(w,true)}
-  var scrollAnchor=0
-  w.setOnScrollChangeListener{_,_,scrollY,_,_->
-   if(scrollY-scrollAnchor>52.dp()){setDockExpanded(false);scrollAnchor=scrollY}
-   else if(scrollAnchor-scrollY>52.dp()){setDockExpanded(true);scrollAnchor=scrollY}
+  // Positive scroll delta = content moving upwards: hide app chrome.
+  // Negative scroll delta = content moving downwards: reveal chrome again.
+  var scrollDistance=0
+  var previousDirection=0
+  w.setOnScrollChangeListener{_,_,scrollY,_,oldScrollY->
+   if(tabs.getOrNull(active)===w&&!controlsExpanded){
+    val delta=scrollY-oldScrollY
+    if(scrollY<=2){scrollDistance=0;setChromeVisible(true)}
+    else if(kotlin.math.abs(delta)>1){
+     val direction=if(delta>0)1 else -1
+     if(direction!=previousDirection)scrollDistance=0
+     previousDirection=direction
+     scrollDistance+=kotlin.math.abs(delta)
+     if(scrollDistance>=24.dp()){
+      setChromeVisible(direction<0)
+      scrollDistance=0
+     }
+    }
+   }
   }
   w.webViewClient=object:WebViewClient(){
    override fun onPageStarted(view:WebView,url:String?,favicon:android.graphics.Bitmap?){
@@ -427,7 +413,7 @@ class MainActivity:AppCompatActivity(){
   if(index !in tabs.indices)return
   active=index;container.removeAllViews()
   val w=tabs[index];(w.parent as? android.view.ViewGroup)?.removeView(w)
-  container.addView(w,FrameLayout.LayoutParams(-1,-1));updateCount();updateAddressBar()
+  container.addView(w,FrameLayout.LayoutParams(-1,-1));updateCount();updateAddressBar();setChromeVisible(true)
  }
  private fun updateCount(){tabButton.text="▢ ${tabs.size}"}
  private fun closeAllOtherTabs(){
@@ -458,15 +444,63 @@ class MainActivity:AppCompatActivity(){
  private fun setControlsExpanded(expanded:Boolean){
   controlsExpanded=expanded
   topBar.visibility=if(expanded)View.VISIBLE else View.GONE
-  if(::floatingHandle.isInitialized)floatingHandle.visibility=if(expanded||dockExpanded)View.GONE else View.VISIBLE
+  if(::floatingHandle.isInitialized)
+   floatingHandle.visibility=if(expanded||dockExpanded||!chromeVisible)View.GONE else View.VISIBLE
   uiHandler.removeCallbacks(collapseControls)
   if(expanded)uiHandler.postDelayed(collapseControls,8000)
  }
+ // Manual collapse is persisted. Scroll-triggered auto-hide does not change that choice.
  private fun setDockExpanded(expanded:Boolean){
   dockExpanded=expanded
-  if(::floatingDock.isInitialized)floatingDock.visibility=if(expanded)View.VISIBLE else View.GONE
-  if(::floatingHandle.isInitialized)floatingHandle.visibility=if(expanded||controlsExpanded)View.GONE else View.VISIBLE
+  if(::floatingDock.isInitialized){
+   floatingDock.animate().cancel()
+   floatingDock.visibility=if(expanded&&chromeVisible)View.VISIBLE else View.GONE
+   floatingDock.translationY=0f;floatingDock.alpha=1f
+  }
+  if(::floatingHandle.isInitialized){
+   floatingHandle.animate().cancel()
+   floatingHandle.visibility=if(!expanded&&!controlsExpanded&&chromeVisible)View.VISIBLE else View.GONE
+   floatingHandle.translationY=0f;floatingHandle.alpha=1f
+  }
   getSharedPreferences("web_settings",MODE_PRIVATE).edit().putBoolean("dock_expanded",expanded).apply()
+ }
+ // Smoothly shrink the address bar to free vertical screen space, and slide the
+ // floating dock/restore handle away. Scrolling back reverses both animations.
+ private fun setChromeVisible(visible:Boolean){
+  if(chromeVisible==visible)return
+  chromeVisible=visible
+  if(!visible)setControlsExpanded(false)
+  if(::addressBarView.isInitialized){
+   chromeAnimator?.cancel()
+   val startHeight=addressBarView.layoutParams.height
+   val fullHeight=56.dp()
+   chromeAnimator=android.animation.ValueAnimator.ofInt(startHeight,if(visible)fullHeight else 0).apply{
+    duration=230L
+    interpolator=android.view.animation.DecelerateInterpolator()
+    addUpdateListener{animation->
+     val height=animation.animatedValue as Int
+     addressBarView.layoutParams=addressBarView.layoutParams.apply{this.height=height}
+     addressBarView.alpha=(height.toFloat()/fullHeight).coerceIn(0f,1f)
+    }
+    start()
+   }
+  }
+  if(::floatingDock.isInitialized){
+   val showDock=visible&&dockExpanded
+   floatingDock.animate().cancel()
+   if(showDock)floatingDock.visibility=View.VISIBLE
+   floatingDock.animate().translationY(if(showDock)0f else 100.dp().toFloat())
+    .alpha(if(showDock)1f else 0f).setDuration(230L)
+    .withEndAction{if(!showDock)floatingDock.visibility=View.GONE}.start()
+  }
+  if(::floatingHandle.isInitialized){
+   val showHandle=visible&&!dockExpanded&&!controlsExpanded
+   floatingHandle.animate().cancel()
+   if(showHandle)floatingHandle.visibility=View.VISIBLE
+   floatingHandle.animate().translationY(if(showHandle)0f else 85.dp().toFloat())
+    .alpha(if(showHandle)1f else 0f).setDuration(230L)
+    .withEndAction{if(!showHandle)floatingHandle.visibility=View.GONE}.start()
+  }
  }
  private fun updateAddressBar(){
   if(::currentUrlLabel.isInitialized)currentUrlLabel.text=tabs.getOrNull(active)?.url?:home
@@ -571,8 +605,9 @@ class MainActivity:AppCompatActivity(){
  private fun monitorDownloads(){
   uiHandler.postDelayed(object:Runnable{
    override fun run(){
+    refreshTransfers()
     var activeDownload=false
-    activeDownload=transfers.values.any{it.state=="Downloading"||it.state=="Paused"}
+    activeDownload=transfers.values.any{it.state=="Downloading"||it.state=="Retrying"||it.state=="Saving file"||it.state.startsWith("Paused")}
     for(id in downloads.keys){
      runCatching{downloadManager.query(DownloadManager.Query().setFilterById(id))}.getOrNull()?.use{cursor->
       if(cursor.moveToFirst()){
@@ -739,12 +774,14 @@ class MainActivity:AppCompatActivity(){
   root.addView(historyActions)
   root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
   val dialog=AlertDialog.Builder(this,androidx.appcompat.R.style.Theme_AppCompat_Dialog).setView(root).create()
+  refreshTransfers()
   heading.text="‹     Downloads"
   heading.setOnClickListener{dialog.dismiss()}
   val samples=mutableMapOf<Long,ArrayDeque<Pair<Long,Long>>>()
   val refresh=object:Runnable{
    override fun run(){
     if(!dialog.isShowing)return
+    refreshTransfers()
     list.removeAllViews()
     transfers.values.sortedByDescending{it.id}.forEach{t->
      val card=LinearLayout(this@MainActivity).apply{
@@ -766,10 +803,20 @@ class MainActivity:AppCompatActivity(){
       setTextColor(0xff00E5EE.toInt());textSize=12f
      })
      val actions=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.HORIZONTAL}
-     if(t.state=="Downloading"){
+     if(t.state=="Downloading"||t.state=="Retrying"){
       actions.addView(Button(this@MainActivity).apply{text="Ⅱ Pause";setOnClickListener{pauseTransfer(t)}})
-     }else if(t.state=="Paused"||t.state.startsWith("Failed")){
+     }else if(t.state.startsWith("Paused")||t.state.startsWith("Failed")){
       actions.addView(Button(this@MainActivity).apply{text="▶ Resume";setOnClickListener{startTransfer(t)}})
+     }
+     if(t.state=="Completed"&&t.uri.startsWith("content://")){
+      actions.addView(Button(this@MainActivity).apply{text="Open";setOnClickListener{
+       runCatching{
+        startActivity(Intent(Intent.ACTION_VIEW).apply{
+         setDataAndType(Uri.parse(t.uri),t.mime.ifBlank{"*/*"})
+         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        })
+       }.onFailure{Toast.makeText(this@MainActivity,"No app available to open this file",Toast.LENGTH_LONG).show()}
+      }})
      }
      actions.addView(Button(this@MainActivity).apply{text="× Remove";setOnClickListener{removeTransfer(t)}})
      card.addView(actions)
@@ -952,8 +999,21 @@ class MainActivity:AppCompatActivity(){
 
 }
 '''.replace('__WEB_URL__',url))
+# A true foreground service handles downloads after the activity is left or replaced.
+service=src/'java/com/webtoapp/template/DownloadService.kt'
+service.write_text((Path(__file__).with_name('download_service.kt')).read_text())
 layout.write_text('''<?xml version="1.0" encoding="utf-8"?><androidx.swiperefreshlayout.widget.SwipeRefreshLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/swipeRefresh" android:layout_width="match_parent" android:layout_height="match_parent"><WebView android:id="@+id/webView" android:layout_width="match_parent" android:layout_height="match_parent" /></androidx.swiperefreshlayout.widget.SwipeRefreshLayout>''')
-s=manifest.read_text(); s=re.sub(r'android:label="[^"]*"',f'android:label="{name}"',s); s=re.sub(r'android:screenOrientation="[^"]*"',f'android:screenOrientation="{orientation}"',s)
+s=manifest.read_text()
+if 'android.permission.FOREGROUND_SERVICE_DATA_SYNC' not in s:
+    s=s.replace('<uses-permission android:name="android.permission.INTERNET" />',
+     '<uses-permission android:name="android.permission.INTERNET" />\n'
+     '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n'
+     '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />\n'
+     '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />')
+if 'android:name=".DownloadService"' not in s:
+    s=s.replace('</application>','<service android:name=".DownloadService" android:exported="false" '
+     'android:foregroundServiceType="dataSync" />\n    </application>')
+s=re.sub(r'android:label="[^"]*"',f'android:label="{name}"',s); s=re.sub(r'android:screenOrientation="[^"]*"',f'android:screenOrientation="{orientation}"',s)
 # Cropper is needed by the builder only, not by generated website apps.
 s=re.sub(r'\s*<activity android:name="com\.canhub\.cropper\.CropImageActivity"[^>]*/>','',s)
 manifest.write_text(s)
