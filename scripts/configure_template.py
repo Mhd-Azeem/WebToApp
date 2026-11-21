@@ -4,6 +4,8 @@ p=argparse.ArgumentParser()
 p.add_argument('--url',required=True); p.add_argument('--name',required=True); p.add_argument('--package',required=True)
 p.add_argument('--orientation',choices=['auto','portrait','landscape'],default='auto')
 p.add_argument('--icon-base64',default='')
+# The generated Android UI is authored in the Kotlin template below, not the builder XML.
+# Dock expand/collapse state is persisted per installed app.
 a=p.parse_args()
 root=Path(__file__).resolve().parents[1]/'android-template'; src=root/'app/src/main'
 main=src/'java/com/webtoapp/template/MainActivity.kt'; layout=src/'res/layout/activity_main.xml'; manifest=src/'AndroidManifest.xml'; gradle=root/'app/build.gradle.kts'
@@ -49,6 +51,9 @@ class MainActivity:AppCompatActivity(){
  private lateinit var downloadButton:TextView
  private lateinit var topBar:LinearLayout
  private lateinit var floatingHandle:TextView
+ private lateinit var floatingDock:LinearLayout
+ private lateinit var currentUrlLabel:TextView
+ private var dockExpanded=true
  private var controlsExpanded=false
  private val collapseControls=Runnable{setControlsExpanded(false)}
  private val tabs=ArrayList<WebView>()
@@ -152,54 +157,86 @@ class MainActivity:AppCompatActivity(){
  override fun onCreate(savedInstanceState:Bundle?){
   super.onCreate(savedInstanceState)
   WindowCompat.setDecorFitsSystemWindows(window,false)
-  window.statusBarColor=Color.rgb(7,22,45)
-  window.navigationBarColor=Color.rgb(7,22,45)
+  window.statusBarColor=Color.BLACK
+  window.navigationBarColor=Color.BLACK
   window.decorView.systemUiVisibility=0
   window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN or WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
   restoreTransfers()
   val saved=getSharedPreferences("app_downloads",MODE_PRIVATE)
   saved.all.forEach{(key,value)->key.toLongOrNull()?.let{id->if(value is String)downloads[id]=Pair(value,SystemClock.elapsedRealtime())}}
-  val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
+
+  // Generated app chrome: immersive WebView, AMOLED address bar, collapsible dock.
+  val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setBackgroundColor(Color.BLACK)}
+  val addressBar=LinearLayout(this).apply{
+   orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL
+   setPadding(13.dp(),6.dp(),13.dp(),6.dp());setBackgroundColor(Color.BLACK)
+  }
+  val addressIcon=TextView(this).apply{
+   text="◎";textSize=22f;gravity=android.view.Gravity.CENTER
+   setTextColor(0xff00E5EE.toInt())
+  }
+  addressBar.addView(addressIcon,LinearLayout.LayoutParams(34.dp(),44.dp()))
+  currentUrlLabel=TextView(this).apply{
+   text="Opening website...";textSize=13f;maxLines=1
+   ellipsize=android.text.TextUtils.TruncateAt.MIDDLE
+   gravity=android.view.Gravity.CENTER_VERTICAL
+   setTextColor(0xffE8F6F7.toInt())
+   setPadding(13.dp(),0,13.dp(),0)
+   background=rounded(0xff151C1F.toInt(),18)
+   setOnClickListener{
+    val input=EditText(this@MainActivity).apply{
+     setSingleLine(true);setText(tabs.getOrNull(active)?.url?:home)
+     inputType=android.text.InputType.TYPE_TEXT_VARIATION_URI
+    }
+    AlertDialog.Builder(this@MainActivity).setTitle("Open website").setView(input)
+     .setPositiveButton("Go"){_,_->
+      val entered=input.text.toString().trim()
+      val target=if(entered.startsWith("http://")||entered.startsWith("https://"))entered else "https://$entered"
+      if(Uri.parse(target).host.isNullOrBlank())Toast.makeText(this@MainActivity,"Invalid URL",Toast.LENGTH_SHORT).show()
+      else tabs.getOrNull(active)?.loadUrl(target)
+     }.setNegativeButton("Cancel",null).show()
+   }
+  }
+  addressBar.addView(currentUrlLabel,LinearLayout.LayoutParams(0,44.dp(),1f))
+  val addressMenu=TextView(this).apply{
+   text="⋮";textSize=24f;gravity=android.view.Gravity.CENTER;setTextColor(Color.WHITE)
+   setOnClickListener{setControlsExpanded(!controlsExpanded)}
+  }
+  addressBar.addView(addressMenu,LinearLayout.LayoutParams(38.dp(),44.dp()))
+  root.addView(addressBar,LinearLayout.LayoutParams(-1,56.dp()))
+
   val overlay=FrameLayout(this)
+  container=FrameLayout(this)
+  overlay.addView(container,FrameLayout.LayoutParams(-1,-1))
   val controls=LinearLayout(this).apply{
    orientation=LinearLayout.VERTICAL
-   setPadding(16.dp(),18.dp(),16.dp(),18.dp())
-   background=rounded(0xff07182F.toInt(),30,0xff24538B.toInt())
-   elevation=16.dp().toFloat()
+   setPadding(14.dp(),16.dp(),14.dp(),14.dp())
+   background=rounded(0xff0A1114.toInt(),23,0xff008E98.toInt())
+   elevation=18.dp().toFloat()
   }
   topBar=controls
-  val icons=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER}
-  fun icon(symbol:String,label:String,action:()->Unit):LinearLayout{
-   val item=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;gravity=android.view.Gravity.CENTER;setPadding(5.dp(),0,5.dp(),0)}
-   item.addView(TextView(this).apply{
-    text=symbol;textSize=27f;gravity=android.view.Gravity.CENTER
-    setTextColor(Color.WHITE);background=rounded(0xff10447C.toInt(),17)
-    layoutParams=LinearLayout.LayoutParams(62.dp(),62.dp())
-    setOnClickListener{setControlsExpanded(false);action()}
-   })
-   item.addView(TextView(this).apply{
-    text=label;textSize=12f;gravity=android.view.Gravity.CENTER
-    setTextColor(0xffD6E8FF.toInt());setPadding(0,8.dp(),0,0)
-   })
-   return item
+  val panelHeading=TextView(this).apply{
+   text="QUICK ACTIONS";textSize=13f;setTextColor(0xff00E5EE.toInt())
+   setPadding(8.dp(),4.dp(),8.dp(),12.dp())
   }
-  tabButton=TextView(this).apply{text="▢";textSize=25f;setTextColor(Color.WHITE)}
-  icons.addView(icon("▢","Tabs"){showTabs()})
-  icons.addView(icon("↓","Downloads"){showDownloads()})
-  icons.addView(icon("⚙","Settings"){showSettings()})
-  controls.addView(icons)
+  controls.addView(panelHeading)
   fun actionRow(symbol:String,title:String,action:()->Unit){
-   val row=LinearLayout(this).apply{
+   val item=LinearLayout(this).apply{
     orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL
-    setPadding(14.dp(),12.dp(),14.dp(),12.dp())
-    background=rounded(0xff102B4C.toInt(),14)
+    setPadding(13.dp(),11.dp(),13.dp(),11.dp())
+    background=rounded(0xff172126.toInt(),14)
     setOnClickListener{setControlsExpanded(false);action()}
    }
-   row.addView(TextView(this).apply{text=symbol;textSize=23f;setTextColor(0xff79C7FF.toInt())},LinearLayout.LayoutParams(42.dp(),-2))
-   row.addView(TextView(this).apply{text=title;textSize=15f;setTextColor(Color.WHITE)},LinearLayout.LayoutParams(0,-2,1f))
-   controls.addView(row,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=5.dp()})
+   item.addView(TextView(this).apply{
+    text=symbol;textSize=22f;gravity=android.view.Gravity.CENTER_VERTICAL
+    setTextColor(0xff00E5EE.toInt())
+   },LinearLayout.LayoutParams(37.dp(),-2))
+   item.addView(TextView(this).apply{
+    text=title;textSize=15f;setTextColor(Color.WHITE)
+   },LinearLayout.LayoutParams(0,-2,1f))
+   controls.addView(item,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=6.dp()})
   }
-  actionRow("⌂","New Tab"){openTab(getSharedPreferences("web_settings",MODE_PRIVATE).getString("homepage",home)?:home,true)}
+  actionRow("⊞","New Tab"){openTab(getSharedPreferences("web_settings",MODE_PRIVATE).getString("homepage",home)?:home,true)}
   actionRow("↻","Refresh"){tabs.getOrNull(active)?.reload()}
   actionRow("▣","Desktop Mode"){
    val p=getSharedPreferences("web_settings",MODE_PRIVATE)
@@ -220,49 +257,73 @@ class MainActivity:AppCompatActivity(){
    val intent=Intent(Intent.ACTION_SEND).apply{type="text/plain";putExtra(Intent.EXTRA_TEXT,tabs.getOrNull(active)?.url?:home)}
    startActivity(Intent.createChooser(intent,"Share page"))
   }
-  val closeRow=LinearLayout(this).apply{gravity=android.view.Gravity.END}
-  closeRow.addView(TextView(this).apply{
-   text="×";textSize=30f;gravity=android.view.Gravity.CENTER
-   setTextColor(Color.WHITE);background=rounded(0xff071D4C.toInt(),50,0xff267DFF.toInt())
+  actionRow("⚙","Settings"){showSettings()}
+  val closePanel=TextView(this).apply{
+   text="Close  ×";textSize=14f;gravity=android.view.Gravity.END
+   setTextColor(0xff00E5EE.toInt());setPadding(8.dp(),10.dp(),8.dp(),4.dp())
    setOnClickListener{setControlsExpanded(false)}
-  },LinearLayout.LayoutParams(56.dp(),56.dp()))
-  controls.addView(closeRow)
-  downloadButton=TextView(this).apply{visibility=View.GONE}
+  }
+  controls.addView(closePanel)
   controls.visibility=View.GONE
-  floatingHandle=TextView(this).apply{
-   text="▦";textSize=27f;gravity=android.view.Gravity.CENTER
-   setTextColor(Color.WHITE)
-   background=rounded(0xff061C45.toInt(),50,0xff267DFF.toInt())
+  downloadButton=TextView(this).apply{visibility=View.GONE}
+  tabButton=TextView(this).apply{text="▢";visibility=View.GONE}
+
+  // Four primary navigation actions and a dedicated collapse chevron.
+  floatingDock=LinearLayout(this).apply{
+   orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL
+   setPadding(6.dp(),5.dp(),6.dp(),5.dp())
+   background=rounded(0xee10191c.toInt(),27,0xff246069.toInt())
    elevation=16.dp().toFloat()
-   setOnClickListener{setControlsExpanded(!controlsExpanded)}
   }
-  container=FrameLayout(this)
-  root.setBackgroundColor(0xff08172F.toInt())
-  overlay.addView(container,FrameLayout.LayoutParams(-1,-1))
-  overlay.addView(controls,FrameLayout.LayoutParams(280.dp(),-2,android.view.Gravity.BOTTOM or android.view.Gravity.END).apply{
-   bottomMargin=92.dp();rightMargin=14.dp()
-  })
-  overlay.addView(floatingHandle,FrameLayout.LayoutParams(64.dp(),64.dp(),android.view.Gravity.BOTTOM or android.view.Gravity.END).apply{
-   bottomMargin=92.dp();rightMargin=14.dp()
-  })
-  var startY=0f
-  var startOffset=0f
-  floatingHandle.setOnTouchListener{view,event->
-   when(event.actionMasked){
-    android.view.MotionEvent.ACTION_DOWN->{startY=event.rawY;startOffset=view.translationY;true}
-    android.view.MotionEvent.ACTION_MOVE->{
-     val delta=event.rawY-startY
-     view.translationY=(startOffset+delta).coerceIn(-overlay.height.toFloat()+160.dp(),0f)
-     controls.translationY=view.translationY
-     true
-    }
-    android.view.MotionEvent.ACTION_UP->{
-     if(kotlin.math.abs(event.rawY-startY)<12.dp())setControlsExpanded(!controlsExpanded)
-     true
-    }
-    else->false
+  fun dockAction(symbol:String,label:String,activeItem:Boolean=false,action:()->Unit){
+   val item=LinearLayout(this).apply{
+    orientation=LinearLayout.VERTICAL;gravity=android.view.Gravity.CENTER
+    background=if(activeItem)rounded(0xff103b40.toInt(),18) else rounded(0x0010191c,18)
+    setOnClickListener{setControlsExpanded(false);action()}
    }
+   item.addView(TextView(this).apply{
+    text=symbol;textSize=23f;gravity=android.view.Gravity.CENTER
+    setTextColor(if(activeItem)0xff00E5EE.toInt() else Color.WHITE)
+   },LinearLayout.LayoutParams(-1,31.dp()))
+   item.addView(TextView(this).apply{
+    text=label;textSize=10f;gravity=android.view.Gravity.CENTER
+    setTextColor(if(activeItem)0xff00E5EE.toInt() else 0xffCBD8DB.toInt())
+   })
+   floatingDock.addView(item,LinearLayout.LayoutParams(0,-1,1f))
   }
+  dockAction("⌂","Home",true){
+   tabs.getOrNull(active)?.loadUrl(getSharedPreferences("web_settings",MODE_PRIVATE).getString("homepage",home)?:home)
+  }
+  dockAction("▢","Tabs"){showTabs()}
+  dockAction("↓","Downloads"){showDownloads()}
+  dockAction("☰","Menu"){setControlsExpanded(!controlsExpanded)}
+  floatingDock.addView(TextView(this).apply{
+   text="⌄";textSize=24f;gravity=android.view.Gravity.CENTER
+   setTextColor(0xff00E5EE.toInt())
+   contentDescription="Collapse navigation dock"
+   setOnClickListener{setControlsExpanded(false);setDockExpanded(false)}
+  },LinearLayout.LayoutParams(29.dp(),-1))
+
+  // Collapsed state is a small persistent pill. Tapping it restores all dock actions.
+  floatingHandle=TextView(this).apply{
+   text="⌃";textSize=28f;gravity=android.view.Gravity.CENTER
+   setTextColor(0xff00E5EE.toInt())
+   contentDescription="Expand navigation dock"
+   background=rounded(0xff10191c.toInt(),30,0xff00E5EE.toInt())
+   elevation=16.dp().toFloat()
+   visibility=View.GONE
+   setOnClickListener{setDockExpanded(true)}
+  }
+  val dockWidth=(resources.displayMetrics.widthPixels-24.dp()).coerceAtMost(420.dp())
+  overlay.addView(controls,FrameLayout.LayoutParams(286.dp(),-2,android.view.Gravity.BOTTOM or android.view.Gravity.END).apply{
+   bottomMargin=99.dp();rightMargin=13.dp()
+  })
+  overlay.addView(floatingDock,FrameLayout.LayoutParams(dockWidth,68.dp(),android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL).apply{
+   bottomMargin=17.dp()
+  })
+  overlay.addView(floatingHandle,FrameLayout.LayoutParams(58.dp(),48.dp(),android.view.Gravity.BOTTOM or android.view.Gravity.END).apply{
+   bottomMargin=22.dp();rightMargin=16.dp()
+  })
   root.addView(overlay,LinearLayout.LayoutParams(-1,0,1f))
   setContentView(root)
   ViewCompat.setOnApplyWindowInsetsListener(root){view,insets->
@@ -270,6 +331,8 @@ class MainActivity:AppCompatActivity(){
    view.setPadding(bars.left,bars.top,bars.right,bars.bottom)
    insets
   }
+  dockExpanded=getSharedPreferences("web_settings",MODE_PRIVATE).getBoolean("dock_expanded",true)
+  setDockExpanded(dockExpanded)
   val settingsPrefs=getSharedPreferences("web_settings",MODE_PRIVATE)
   val savedTabs=settingsPrefs.getString("saved_tabs","")?:""
   if(settingsPrefs.getBoolean("restore_tabs",true)&&savedTabs.isNotBlank()){
@@ -299,7 +362,18 @@ class MainActivity:AppCompatActivity(){
    w.settings.userAgentString=w.settings.userAgentString.replace("Mobile ","").replace("; wv","")
   }
   CookieManager.getInstance().apply{setAcceptCookie(true);setAcceptThirdPartyCookies(w,true)}
+  var scrollAnchor=0
+  w.setOnScrollChangeListener{_,_,scrollY,_,_->
+   if(scrollY-scrollAnchor>52.dp()){setDockExpanded(false);scrollAnchor=scrollY}
+   else if(scrollAnchor-scrollY>52.dp()){setDockExpanded(true);scrollAnchor=scrollY}
+  }
   w.webViewClient=object:WebViewClient(){
+   override fun onPageStarted(view:WebView,url:String?,favicon:android.graphics.Bitmap?){
+    if(tabs.getOrNull(active)===view)updateAddressBar()
+   }
+   override fun onPageFinished(view:WebView,url:String?){
+    if(tabs.getOrNull(active)===view)updateAddressBar()
+   }
    override fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest):Boolean{
     val uri=request.url
     if(uri.scheme!="http"&&uri.scheme!="https"){runCatching{startActivity(Intent(Intent.ACTION_VIEW,uri))};return true}
@@ -351,7 +425,7 @@ class MainActivity:AppCompatActivity(){
   if(index !in tabs.indices)return
   active=index;container.removeAllViews()
   val w=tabs[index];(w.parent as? android.view.ViewGroup)?.removeView(w)
-  container.addView(w,FrameLayout.LayoutParams(-1,-1));updateCount()
+  container.addView(w,FrameLayout.LayoutParams(-1,-1));updateCount();updateAddressBar()
  }
  private fun updateCount(){tabButton.text="▢ ${tabs.size}"}
  private fun closeTab(index:Int){
@@ -366,45 +440,78 @@ class MainActivity:AppCompatActivity(){
  private fun setControlsExpanded(expanded:Boolean){
   controlsExpanded=expanded
   topBar.visibility=if(expanded)View.VISIBLE else View.GONE
-  floatingHandle.visibility=if(expanded)View.GONE else View.VISIBLE
+  if(::floatingHandle.isInitialized)floatingHandle.visibility=if(expanded||dockExpanded)View.GONE else View.VISIBLE
   uiHandler.removeCallbacks(collapseControls)
-  if(expanded)uiHandler.postDelayed(collapseControls,5000)
+  if(expanded)uiHandler.postDelayed(collapseControls,8000)
+ }
+ private fun setDockExpanded(expanded:Boolean){
+  dockExpanded=expanded
+  if(::floatingDock.isInitialized)floatingDock.visibility=if(expanded)View.VISIBLE else View.GONE
+  if(::floatingHandle.isInitialized)floatingHandle.visibility=if(expanded||controlsExpanded)View.GONE else View.VISIBLE
+  getSharedPreferences("web_settings",MODE_PRIVATE).edit().putBoolean("dock_expanded",expanded).apply()
+ }
+ private fun updateAddressBar(){
+  if(::currentUrlLabel.isInitialized)currentUrlLabel.text=tabs.getOrNull(active)?.url?:home
  }
  private fun showTabs(){
   val panel=LinearLayout(this).apply{
-   orientation=LinearLayout.VERTICAL;setPadding(18.dp(),18.dp(),18.dp(),18.dp())
-   background=rounded(0xff0B1B35.toInt(),24)
+   orientation=LinearLayout.VERTICAL;setPadding(20.dp(),20.dp(),20.dp(),22.dp())
+   setBackgroundColor(Color.BLACK)
   }
   val dialog=AlertDialog.Builder(this).setView(panel).create()
   val header=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL}
-  header.addView(TextView(this).apply{text="Your tabs  ·  ${tabs.size}";textSize=21f;setTextColor(Color.WHITE)},LinearLayout.LayoutParams(0,-2,1f))
   header.addView(TextView(this).apply{
-   text="+ New";textSize=15f;setTextColor(0xff46C6FF.toInt());setPadding(12.dp(),10.dp(),12.dp(),10.dp())
-   setOnClickListener{openTab(getSharedPreferences("web_settings",MODE_PRIVATE).getString("homepage",home)?:home,true);dialog.dismiss()}
+   text="▢   Tabs";textSize=25f;setTextColor(0xff00E5EE.toInt())
+  },LinearLayout.LayoutParams(0,-2,1f))
+  header.addView(TextView(this).apply{
+   text="×";textSize=29f;setTextColor(Color.WHITE);setPadding(12.dp(),0,4.dp(),0)
+   setOnClickListener{dialog.dismiss()}
   })
   panel.addView(header)
-  val scroll=ScrollView(this)
-  val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(0,12.dp(),0,0)}
+  panel.addView(TextView(this).apply{
+   text=tabs.size.toString()+" Tabs Open";textSize=13f;setTextColor(0xffB1C4CA.toInt())
+   setPadding(0,16.dp(),0,14.dp())
+  })
+  val scroll=ScrollView(this).apply{fillViewport=true}
+  val list=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.VERTICAL}
   scroll.addView(list)
   panel.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
   tabs.toList().forEachIndexed{index,w->
    val row=LinearLayout(this).apply{
     orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL
-    setPadding(14.dp(),12.dp(),10.dp(),12.dp())
-    background=rounded(if(index==active)0xff194B80.toInt() else 0xff152F52.toInt(),18)
+    setPadding(15.dp(),14.dp(),12.dp(),14.dp())
+    background=rounded(if(index==active)0xff103037.toInt() else 0xff151D20.toInt(),18,
+     if(index==active)0xff00E5EE.toInt() else 0xff263338.toInt())
    }
-   val title=TextView(this).apply{
-    text="${if(index==active)"●  " else ""}${w.title?:w.url?:"New tab"}\n${w.url?:""}"
-    setTextColor(Color.WHITE);maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END;textSize=14f
-    setOnClickListener{activate(index);dialog.dismiss()}
-   }
-   val close=TextView(this).apply{text="×";textSize=23f;setTextColor(0xffA9C5E9.toInt());setPadding(12.dp(),5.dp(),12.dp(),5.dp());setOnClickListener{closeTab(index);dialog.dismiss();showTabs()}}
-   row.addView(title,LinearLayout.LayoutParams(0,-2,1f));row.addView(close)
+   val textColumn=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
+   textColumn.addView(TextView(this).apply{
+    text=(if(index==active)"●  " else "")+(w.title?:w.url?:"New tab")
+    setTextColor(Color.WHITE);maxLines=2;ellipsize=android.text.TextUtils.TruncateAt.END;textSize=16f
+   })
+   textColumn.addView(TextView(this).apply{
+    text=w.url?:"";maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.MIDDLE
+    setTextColor(0xffA4B8BE.toInt());textSize=12f;setPadding(0,5.dp(),0,0)
+   })
+   textColumn.setOnClickListener{activate(index);dialog.dismiss()}
+   row.addView(textColumn,LinearLayout.LayoutParams(0,-2,1f))
+   row.addView(TextView(this).apply{
+    text="×";textSize=25f;gravity=android.view.Gravity.CENTER
+    setTextColor(0xffCCDADD.toInt())
+    setOnClickListener{closeTab(index);dialog.dismiss();showTabs()}
+   },LinearLayout.LayoutParams(41.dp(),46.dp()))
    list.addView(row,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=10.dp()})
   }
+  panel.addView(TextView(this).apply{
+   text="+  New Tab";textSize=16f;gravity=android.view.Gravity.CENTER
+   setTextColor(Color.BLACK);background=rounded(0xff00E5EE.toInt(),25)
+   setOnClickListener{
+    openTab(getSharedPreferences("web_settings",MODE_PRIVATE).getString("homepage",home)?:home,true)
+    dialog.dismiss()
+   }
+  },LinearLayout.LayoutParams(-1,54.dp()).apply{topMargin=12.dp()})
   dialog.show()
   dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-  dialog.window?.setLayout(-1,(resources.displayMetrics.heightPixels*0.78).toInt())
+  dialog.window?.setLayout(-1,-1)
  }
  private fun rounded(fill:Int,radius:Int,stroke:Int=0):GradientDrawable=
   GradientDrawable().apply{setColor(fill);cornerRadius=radius.dp().toFloat();if(stroke!=0)setStroke(1.dp(),stroke)}
@@ -441,11 +548,11 @@ class MainActivity:AppCompatActivity(){
  }
  private fun blueDialog(dialog:AlertDialog){
   dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-  dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(0xff00AFFF.toInt())
-  dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(0xff00AFFF.toInt())
+  dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(0xff00E5EE.toInt())
+  dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(0xff00E5EE.toInt())
  }
  private fun showDownloads(){
-  val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setBackgroundColor(0xff0B1B35.toInt());setPadding(16.dp(),12.dp(),16.dp(),12.dp())}
+  val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setBackgroundColor(0xff050809.toInt());setPadding(16.dp(),12.dp(),16.dp(),12.dp())}
   val heading=TextView(this).apply{text="Downloads";setTextColor(Color.WHITE);textSize=23f;setPadding(6.dp(),4.dp(),6.dp(),12.dp())}
   val scroll=ScrollView(this)
   val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
@@ -453,7 +560,7 @@ class MainActivity:AppCompatActivity(){
   root.addView(heading)
   val historyActions=TextView(this).apply{
    text="History  ·  Clear completed"
-   setTextColor(0xff58C7FF.toInt());textSize=14f
+   setTextColor(0xff00E5EE.toInt());textSize=14f
    setPadding(8.dp(),8.dp(),8.dp(),12.dp())
    setOnClickListener{
     val finished=downloads.keys.filter{id->
@@ -480,13 +587,13 @@ class MainActivity:AppCompatActivity(){
     transfers.values.sortedByDescending{it.id}.forEach{t->
      val card=LinearLayout(this@MainActivity).apply{
       orientation=LinearLayout.VERTICAL;setPadding(16.dp(),14.dp(),16.dp(),14.dp())
-      background=rounded(0xff19345A.toInt(),18)
+      background=rounded(0xff151E21.toInt(),18)
      }
      card.addView(TextView(this@MainActivity).apply{text=t.filename;setTextColor(Color.WHITE);textSize=16f})
      val pct=if(t.size>0)(t.done*100/t.size).toInt().coerceIn(0,100) else 0
      card.addView(TextView(this@MainActivity).apply{
       text="${t.state} • ${pretty(t.done)} / ${if(t.size>0)pretty(t.size) else "Unknown"}"
-      setTextColor(0xffB8CDEA.toInt());textSize=13f
+      setTextColor(0xffADBDC1.toInt());textSize=13f
      })
      card.addView(ProgressBar(this@MainActivity,null,android.R.attr.progressBarStyleHorizontal).apply{
       isIndeterminate=t.size<=0&&t.state=="Downloading";max=100;progress=pct
@@ -494,7 +601,7 @@ class MainActivity:AppCompatActivity(){
      val eta=if(t.speed>0&&t.size>t.done)" • ${duration((t.size-t.done)/t.speed)} remaining" else ""
      card.addView(TextView(this@MainActivity).apply{
       text=if(t.state=="Downloading")"${pretty(t.speed)}/s$eta" else t.state
-      setTextColor(0xff8ED7FF.toInt());textSize=12f
+      setTextColor(0xff00E5EE.toInt());textSize=12f
      })
      val actions=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.HORIZONTAL}
      if(t.state=="Downloading"){
@@ -547,20 +654,20 @@ class MainActivity:AppCompatActivity(){
        val isHistory=status==DownloadManager.STATUS_SUCCESSFUL||status==DownloadManager.STATUS_FAILED
        if(isHistory&&!historyHeader){
         historyHeader=true
-        list.addView(TextView(this@MainActivity).apply{text="HISTORY";textSize=13f;setTextColor(0xff58C7FF.toInt());setPadding(8.dp(),16.dp(),8.dp(),10.dp())})
+        list.addView(TextView(this@MainActivity).apply{text="HISTORY";textSize=13f;setTextColor(0xff00E5EE.toInt());setPadding(8.dp(),16.dp(),8.dp(),10.dp())})
        }else if(!isHistory&&!activeHeader){
         activeHeader=true
-        list.addView(TextView(this@MainActivity).apply{text="ACTIVE DOWNLOADS";textSize=13f;setTextColor(0xff58C7FF.toInt());setPadding(8.dp(),10.dp(),8.dp(),10.dp())})
+        list.addView(TextView(this@MainActivity).apply{text="ACTIVE DOWNLOADS";textSize=13f;setTextColor(0xff00E5EE.toInt());setPadding(8.dp(),10.dp(),8.dp(),10.dp())})
        }
        val card=LinearLayout(this@MainActivity).apply{
         orientation=LinearLayout.VERTICAL
         setPadding(16.dp(),14.dp(),16.dp(),14.dp())
-        background=rounded(0xff19345A.toInt(),18)
+        background=rounded(0xff151E21.toInt(),18)
        }
        card.addView(TextView(this@MainActivity).apply{text=info.first;setTextColor(Color.WHITE);textSize=16f;maxLines=2})
        card.addView(TextView(this@MainActivity).apply{
         text="$state • ${pretty(done)} / ${pretty(total)}"
-        setTextColor(0xffB8CDEA.toInt());textSize=13f
+        setTextColor(0xffADBDC1.toInt());textSize=13f
        })
        if(status==DownloadManager.STATUS_RUNNING||status==DownloadManager.STATUS_PENDING||status==DownloadManager.STATUS_PAUSED){
         card.addView(ProgressBar(this@MainActivity,null,android.R.attr.progressBarStyleHorizontal).apply{
@@ -568,7 +675,7 @@ class MainActivity:AppCompatActivity(){
         })
         card.addView(TextView(this@MainActivity).apply{
          text=if(speed>0)"${pretty(speed)}/s$eta" else "Calculating speed…"
-         setTextColor(0xffB8CDEA.toInt());textSize=12f
+         setTextColor(0xffADBDC1.toInt());textSize=12f
         })
        }
        val actions=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.HORIZONTAL}
@@ -599,7 +706,7 @@ class MainActivity:AppCompatActivity(){
  }
  private fun showSettings(){
   val prefs=getSharedPreferences("web_settings",MODE_PRIVATE)
-  val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(18.dp(),18.dp(),18.dp(),18.dp());setBackgroundColor(0xff091B35.toInt())}
+  val panel=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(18.dp(),18.dp(),18.dp(),18.dp());setBackgroundColor(0xff000000.toInt())}
   val scroll=ScrollView(this)
   val body=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
   scroll.addView(body)
@@ -607,29 +714,29 @@ class MainActivity:AppCompatActivity(){
   panel.addView(TextView(this).apply{text="‹    Settings";textSize=24f;setTextColor(Color.WHITE);setPadding(4.dp(),4.dp(),4.dp(),20.dp());setOnClickListener{dialog.dismiss()}})
   panel.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
   fun section(title:String){
-   body.addView(TextView(this).apply{text=title;textSize=18f;setTextColor(0xff48C5FF.toInt());setPadding(8.dp(),20.dp(),8.dp(),10.dp())})
+   body.addView(TextView(this).apply{text=title;textSize=18f;setTextColor(0xff00E5EE.toInt());setPadding(8.dp(),20.dp(),8.dp(),10.dp())})
   }
   fun row(title:String,description:String="",action:()->Unit){
    body.addView(TextView(this).apply{
     text=title+if(description.isNotBlank())"\n"+description else ""
     textSize=15f;setTextColor(Color.WHITE);setPadding(16.dp(),15.dp(),16.dp(),15.dp())
-    background=rounded(0xff16345A.toInt(),16);setOnClickListener{action()}
+    background=rounded(0xff151E21.toInt(),16);setOnClickListener{action()}
    },LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=8.dp()})
   }
   fun toggle(label:String,key:String,default:Boolean=false){
    body.addView(Switch(this).apply{
     text=label;textSize=15f;setTextColor(Color.WHITE);isChecked=prefs.getBoolean(key,default)
-    setPadding(14.dp(),12.dp(),14.dp(),12.dp());background=rounded(0xff16345A.toInt(),16)
+    setPadding(14.dp(),12.dp(),14.dp(),12.dp());background=rounded(0xff151E21.toInt(),16)
     setOnCheckedChangeListener{_,checked->prefs.edit().putBoolean(key,checked).apply()}
    },LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=8.dp()})
   }
   section("Appearance")
-  row("Theme","Dark blue / Light / System"){
-   val options=arrayOf("Dark blue","Light","System")
+  row("Theme","AMOLED Black / Light / System"){
+   val options=arrayOf("AMOLED Black","Light","System")
    AlertDialog.Builder(this).setItems(options){_,i->prefs.edit().putInt("theme",i).apply();Toast.makeText(this,"Theme preference saved",Toast.LENGTH_SHORT).show()}.show()
   }
-  row("Accent color","Blue / Cyan / Purple"){
-   AlertDialog.Builder(this).setItems(arrayOf("Blue","Cyan","Purple")){_,i->prefs.edit().putInt("accent",i).apply()}.show()
+  row("Accent color","Cyan / Blue / Purple"){
+   AlertDialog.Builder(this).setItems(arrayOf("Cyan","Blue","Purple")){_,i->prefs.edit().putInt("accent",i).apply()}.show()
   }
   row("Website text size","75% to 150%"){
    val sizes=intArrayOf(75,90,100,110,125,150)
