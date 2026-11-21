@@ -78,7 +78,7 @@ class DownloadService : Service() {
    }
    action == ACTION_PAUSE && id > 0 -> {
     running[id]?.let { it.cancelled = true; it.connection?.disconnect() }
-    saveStatus(id, "Paused")
+    saveStatusPreservingProgress(id, "Paused")
     stopIfIdle()
    }
    action == ACTION_REMOVE && id > 0 -> {
@@ -141,7 +141,7 @@ class DownloadService : Service() {
   if(running.isNotEmpty()) { refreshNotification(true); return }
   if(foreground) {
    if(Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE)
-   else @Suppress("DEPRECATION") stopForeground(true)
+   else stopForeground(true)
    foreground = false
   }
   stopSelf()
@@ -153,6 +153,12 @@ class DownloadService : Service() {
    put("state", state); put("size", size); put("done", done)
    put("speed", speed); put("uri", uri)
   }.toString()).apply()
+ }
+
+ private fun saveStatusPreservingProgress(id:Long,state:String){
+  val previous=try{JSONObject(statuses.getString(id.toString(),"{}")?:"{}")}catch(_:Exception){JSONObject()}
+  saveStatus(id,state,previous.optLong("size",-1L),
+   File(cacheDir,"transfer_" + id + ".part").length(),0,previous.optString("uri",""))
  }
 
  private fun isWifiAllowed(): Boolean {
@@ -172,7 +178,7 @@ class DownloadService : Service() {
    return
   }
   if(!isWifiAllowed()) {
-   saveStatus(id, "Paused: Wi-Fi required")
+   saveStatusPreservingProgress(id, "Paused: Wi-Fi required")
    stopIfIdle()
    return
   }
