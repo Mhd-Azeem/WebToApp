@@ -60,6 +60,7 @@ class MainActivity:AppCompatActivity(){
  private var active=0
  private val home="__WEB_URL__"
  private val downloads=linkedMapOf<Long,Pair<String,Long>>()
+ private data class VideoCandidate(val url:String,val title:String,val mime:String)
  private data class Transfer(val id:Long,val url:String,val filename:String,val mime:String,val agent:String,val cookie:String,
   @Volatile var state:String="Paused",@Volatile var size:Long=-1,@Volatile var done:Long=0,
   @Volatile var speed:Long=0,@Volatile var stop:Boolean=false)
@@ -257,6 +258,7 @@ class MainActivity:AppCompatActivity(){
    val intent=Intent(Intent.ACTION_SEND).apply{type="text/plain";putExtra(Intent.EXTRA_TEXT,tabs.getOrNull(active)?.url?:home)}
    startActivity(Intent.createChooser(intent,"Share page"))
   }
+  actionRow("▶","Download Videos"){showAvailableVideos()}
   actionRow("⚙","Settings"){showSettings()}
   val closePanel=TextView(this).apply{
    text="Close  ×";textSize=14f;gravity=android.view.Gravity.END
@@ -589,6 +591,128 @@ class MainActivity:AppCompatActivity(){
   dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(0xff00E5EE.toInt())
   dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(0xff00E5EE.toInt())
  }
+
+ // Search HTML5 video/source elements and direct video links on the current webpage.
+ // This deliberately does not intercept DRM, blob:, HLS or DASH streams.
+ private fun showAvailableVideos(){
+  val page=tabs.getOrNull(active)?:return
+  if(!page.settings.javaScriptEnabled){
+   Toast.makeText(this,"Video detection requires JavaScript",Toast.LENGTH_LONG).show()
+   return
+  }
+  val scanScript="""
+   (function(){
+    const found=[];
+    const seen=new Set();
+    function add(candidate,title,type,fromPlayer){
+     try{
+      if(!candidate)return;
+      const url=new URL(candidate,document.baseURI).href;
+      if(!/^https?:\/\//i.test(url))return;
+      const mime=String(type||"").toLowerCase().split(";")[0];
+      if(/(mpegurl|dash\+xml|widevine)/i.test(mime))return;
+      if(/\.(m3u8|mpd)(?:[?#]|$)/i.test(url))return;
+      const direct=/\.(mp4|webm|m4v|mov)(?:[?#]|$)/i.test(url);
+      if(!direct&&!fromPlayer&&!/^video\/(mp4|webm|quicktime|x-m4v)$/i.test(mime))return;
+      if(seen.has(url))return;
+      seen.add(url);
+      found.push({url:url,title:String(title||"Website video").trim().slice(0,120),mime:mime});
+     }catch(e){}
+    }
+    document.querySelectorAll("video").forEach(function(video,i){
+     const name=(document.title||"Video")+" ("+(i+1)+")";
+     add(video.currentSrc||video.src,name,video.getAttribute("type")||"",true);
+     video.querySelectorAll("source").forEach(function(source){
+      add(source.src,name,source.type||"",true);
+     });
+    });
+    document.querySelectorAll("a[href]").forEach(function(link){
+     add(link.href,link.textContent||"Video link","",false);
+    });
+    return found.slice(0,40);
+   })()
+  """.trimIndent()
+  Toast.makeText(this,"Searching this page for videos…",Toast.LENGTH_SHORT).show()
+  page.evaluateJavascript(scanScript){result->
+   if(tabs.getOrNull(active)!==page)return@evaluateJavascript
+   val candidates=try{
+    val decoded=org.json.JSONTokener(result?:"null").nextValue()
+    val array=when(decoded){
+     is org.json.JSONArray->decoded
+     is String->org.json.JSONArray(decoded)
+     else->org.json.JSONArray()
+    }
+    val out=ArrayList<VideoCandidate>()
+    val seen=HashSet<String>()
+    for(i in 0 until array.length()){
+     val item=array.optJSONObject(i)?:continue
+     val url=item.optString("url","")
+     val uri=Uri.parse(url)
+     if((uri.scheme!="https"&&uri.scheme!="http")||uri.host.isNullOrBlank())continue
+     if(!seen.add(url))continue
+     out.add(VideoCandidate(url,item.optString("title","Website video"),item.optString("mime","")))
+    }
+    out
+   }catch(e:Exception){
+    Toast.makeText(this,"Could not inspect this webpage",Toast.LENGTH_LONG).show()
+    return@evaluateJavascript
+   }
+   if(candidates.isEmpty()){
+    AlertDialog.Builder(this).setTitle("Download Videos")
+     .setMessage("No directly downloadable videos were found on this page. DRM-protected videos, blob links and adaptive streams are not supported.")
+     .setPositiveButton("OK",null).show()
+   }else{
+    val labels=candidates.mapIndexed{index,item->
+     val format=when{
+      item.mime.contains("webm",true)->"WebM"
+      item.mime.contains("mp4",true)->"MP4"
+      item.url.substringBefore("?").substringBefore("#").endsWith(".webm",true)->"WebM"
+      item.url.substringBefore("?").substringBefore("#").endsWith(".mp4",true)->"MP4"
+      else->"Video"
+     }
+     val name=item.title.ifBlank{"Video " + (index+1)}.take(70)
+     (index+1).toString()+". "+name+"  ·  "+format
+    }
+    AlertDialog.Builder(this).setTitle("Download Videos ("+candidates.size+")")
+     .setItems(labels.toTypedArray()){_,which->
+      startVideoDownload(page,candidates[which])
+     }.setNegativeButton("Cancel",null).show()
+   }
+  }
+ }
+ private fun startVideoDownload(page:WebView,video:VideoCandidate){
+  val uri=Uri.parse(video.url)
+  if((uri.scheme!="https"&&uri.scheme!="http")||uri.host.isNullOrBlank()){
+   Toast.makeText(this,"Unsupported video address",Toast.LENGTH_LONG).show()
+   return
+  }
+  if(getSharedPreferences("web_settings",MODE_PRIVATE).getBoolean("wifi_only",false)){
+   val cm=getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+   val network=cm.getNetworkCapabilities(cm.activeNetwork)
+   if(network?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)!=true){
+    Toast.makeText(this,"Wi-Fi required by download settings",Toast.LENGTH_LONG).show()
+    return
+   }
+  }
+  val mime=when{
+   video.mime.startsWith("video/")->video.mime
+   video.url.substringBefore("?").substringBefore("#").endsWith(".webm",true)->"video/webm"
+   video.url.substringBefore("?").substringBefore("#").endsWith(".mp4",true)->"video/mp4"
+   else->"application/octet-stream"
+  }
+  val name=URLUtil.guessFileName(video.url,"",mime)
+  var id=System.currentTimeMillis()
+  while(transfers.containsKey(id))id++
+  val transfer=Transfer(id,video.url,name,mime,
+   page.settings.userAgentString?:"",CookieManager.getInstance().getCookie(video.url)?:"")
+  transfers[id]=transfer
+  persistTransfer(transfer)
+  startTransfer(transfer)
+  downloadButton.visibility=View.VISIBLE
+  Toast.makeText(this,"Video download started: $name",Toast.LENGTH_LONG).show()
+  showDownloads()
+ }
+
  private fun showDownloads(){
   val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setBackgroundColor(0xff050809.toInt());setPadding(16.dp(),12.dp(),16.dp(),12.dp())}
   val heading=TextView(this).apply{text="Downloads";setTextColor(Color.WHITE);textSize=23f;setPadding(6.dp(),4.dp(),6.dp(),12.dp())}
