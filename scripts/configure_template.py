@@ -472,7 +472,7 @@ class MainActivity:AppCompatActivity(){
    text=tabs.size.toString()+" Tabs Open";textSize=13f;setTextColor(0xffB1C4CA.toInt())
    setPadding(0,16.dp(),0,14.dp())
   })
-  val scroll=ScrollView(this).apply{fillViewport=true}
+  val scroll=ScrollView(this).apply{isFillViewport=true}
   val list=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.VERTICAL}
   scroll.addView(list)
   panel.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
