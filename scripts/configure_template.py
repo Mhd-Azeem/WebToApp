@@ -428,6 +428,22 @@ class MainActivity:AppCompatActivity(){
   container.addView(w,FrameLayout.LayoutParams(-1,-1));updateCount();updateAddressBar()
  }
  private fun updateCount(){tabButton.text="▢ ${tabs.size}"}
+ private fun closeAllOtherTabs(){
+  // Preserve the selected WebView object and its state; destroy only background tabs.
+  val current=tabs.getOrNull(active)?:return
+  if(tabs.size<=1)return
+  tabs.toList().filter{it!==current}.forEach{other->
+   (other.parent as? android.view.ViewGroup)?.removeView(other)
+   other.stopLoading()
+   other.destroy()
+  }
+  tabs.clear()
+  tabs.add(current)
+  active=0
+  activate(0)
+  getSharedPreferences("web_settings",MODE_PRIVATE).edit()
+   .putString("saved_tabs",current.url?:home).apply()
+ }
  private fun closeTab(index:Int){
   if(index !in tabs.indices)return
   val w=tabs.removeAt(index)
@@ -472,6 +488,28 @@ class MainActivity:AppCompatActivity(){
    text=tabs.size.toString()+" Tabs Open";textSize=13f;setTextColor(0xffB1C4CA.toInt())
    setPadding(0,16.dp(),0,14.dp())
   })
+  // Bulk tab action is intentionally explicit: never close the current tab.
+  panel.addView(TextView(this).apply{
+   text="Close All Other Tabs  ·  Keep current tab"
+   textSize=14f
+   gravity=android.view.Gravity.CENTER_VERTICAL
+   setPadding(16.dp(),12.dp(),16.dp(),12.dp())
+   setTextColor(if(tabs.size>1)0xff00E5EE.toInt() else 0xff657A80.toInt())
+   background=rounded(0xff111B1E.toInt(),14,0xff263338.toInt())
+   isEnabled=tabs.size>1
+   setOnClickListener{
+    val others=tabs.size-1
+    AlertDialog.Builder(this@MainActivity)
+     .setTitle("Close all other tabs?")
+     .setMessage("Close $others other tab"+if(others==1)"?" else "s? Your current tab will stay open.")
+     .setNegativeButton("Cancel",null)
+     .setPositiveButton("Close other tabs"){_,_->
+      closeAllOtherTabs()
+      dialog.dismiss()
+      showTabs()
+     }.show()
+   }
+  },LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=14.dp()})
   val scroll=ScrollView(this).apply{isFillViewport=true}
   val list=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.VERTICAL}
   scroll.addView(list)
