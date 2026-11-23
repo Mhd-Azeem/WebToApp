@@ -22,6 +22,9 @@ import android.os.Environment
 import android.view.View
 import android.view.WindowManager
 import android.graphics.Color
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.view.MotionEvent
 import android.graphics.drawable.GradientDrawable
 import android.os.SystemClock
 import android.net.ConnectivityManager
@@ -60,6 +63,10 @@ class MainActivity:AppCompatActivity(){
  private var controlsExpanded=false
  private val collapseControls=Runnable{setControlsExpanded(false)}
  private val tabs=ArrayList<WebView>()
+ private val tabPreviews=java.util.WeakHashMap<WebView,Bitmap>()
+ private var offlineOverlay:View?=null
+ private var fullscreenCustomView:View?=null
+ private var fullscreenCallback:WebChromeClient.CustomViewCallback?=null
  private var active=0
  private val home="__WEB_URL__"
  private val downloads=linkedMapOf<Long,Pair<String,Long>>()
@@ -321,7 +328,9 @@ class MainActivity:AppCompatActivity(){
   monitorDownloads()
   onBackPressedDispatcher.addCallback(this,object:OnBackPressedCallback(true){override fun handleOnBackPressed(){
    val current=tabs.getOrNull(active)
-   if(current?.canGoBack()==true)current.goBack()
+   if(fullscreenCustomView!=null)exitHtmlFullscreen()
+   else if(offlineOverlay!=null)clearOfflinePage()
+   else if(current?.canGoBack()==true)current.goBack()
    else if(tabs.size>1)closeTab(active)
    else finish()
   }})
@@ -332,6 +341,108 @@ class MainActivity:AppCompatActivity(){
   getSharedPreferences("web_settings",MODE_PRIVATE).edit()
    .putString("saved_tabs",tabs.mapNotNull{it.url?.takeIf{u->u.startsWith("http")}}.joinToString("|")).apply()
  }
+
+ private fun networkAvailable():Boolean{
+  val cm=getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+  val cap=cm.getNetworkCapabilities(cm.activeNetwork)?:return false
+  return cap.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+   (android.os.Build.VERSION.SDK_INT<23 || cap.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED))
+ }
+ private fun clearOfflinePage(){
+  offlineOverlay?.let{(it.parent as?android.view.ViewGroup)?.removeView(it)}
+  offlineOverlay=null
+ }
+ private fun showOfflinePage(web:WebView,address:String,description:String){
+  if(tabs.getOrNull(active)!==web)return
+  clearOfflinePage()
+  val panel=LinearLayout(this).apply{
+   orientation=LinearLayout.VERTICAL;gravity=android.view.Gravity.CENTER
+   setPadding(28.dp(),28.dp(),28.dp(),28.dp())
+   setBackgroundColor(Color.BLACK)
+  }
+  panel.addView(TextView(this).apply{
+   text="◌";textSize=66f;setTextColor(0xff00E5EE.toInt())
+   gravity=android.view.Gravity.CENTER
+  })
+  panel.addView(TextView(this).apply{
+   text=if(networkAvailable())"Website unavailable" else "You're offline"
+   textSize=25f;gravity=android.view.Gravity.CENTER;setTextColor(Color.WHITE)
+  })
+  panel.addView(TextView(this).apply{
+   text=description.take(160)+"\n"+address.take(150)
+   textSize=13f;gravity=android.view.Gravity.CENTER;setTextColor(0xffA8B8BE.toInt())
+   setPadding(0,16.dp(),0,30.dp())
+  })
+  panel.addView(TextView(this).apply{
+   text="↻   Try Again";textSize=16f;gravity=android.view.Gravity.CENTER
+   setTextColor(Color.BLACK);background=rounded(0xff00E5EE.toInt(),25)
+   setOnClickListener{clearOfflinePage();web.reload()}
+  },LinearLayout.LayoutParams(-1,54.dp()))
+  panel.addView(TextView(this).apply{
+   text="Network settings";textSize=14f;gravity=android.view.Gravity.CENTER
+   setTextColor(0xff00E5EE.toInt());setPadding(0,20.dp(),0,8.dp())
+   setOnClickListener{
+    startActivity(Intent(android.provider.Settings.ACTION_WIFI_SETTINGS))
+   }
+  })
+  offlineOverlay=panel
+  container.addView(panel,FrameLayout.LayoutParams(-1,-1))
+ }
+ private fun captureTabPreview(web:WebView){
+  if(web.width<20||web.height<20||tabs.getOrNull(active)!==web)return
+  runCatching{
+   val bmp=Bitmap.createBitmap(240,140,Bitmap.Config.RGB_565)
+   val canvas=Canvas(bmp)
+   canvas.drawColor(Color.WHITE)
+   canvas.scale(240f/web.width,140f/web.height)
+   web.draw(canvas)
+   tabPreviews[web]=bmp
+  }
+ }
+ private fun enterHtmlFullscreen(view:View,callback:WebChromeClient.CustomViewCallback){
+  if(fullscreenCustomView!=null){callback.onCustomViewHidden();return}
+  fullscreenCustomView=view
+  fullscreenCallback=callback
+  setControlsExpanded(false)
+  (window.decorView as android.view.ViewGroup).addView(view,
+   android.view.ViewGroup.LayoutParams(-1,-1))
+  addressBarView.visibility=View.GONE
+  floatingDock.visibility=View.GONE
+  floatingHandle.visibility=View.GONE
+  window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_FULLSCREEN or
+   View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+ }
+ private fun exitHtmlFullscreen(){
+  fullscreenCustomView?.let{(it.parent as?android.view.ViewGroup)?.removeView(it)}
+  fullscreenCustomView=null
+  fullscreenCallback?.onCustomViewHidden()
+  fullscreenCallback=null
+  window.decorView.systemUiVisibility=0
+  addressBarView.visibility=View.VISIBLE
+  setChromeVisible(true)
+  if(dockExpanded)floatingDock.visibility=View.VISIBLE
+  else floatingHandle.visibility=View.VISIBLE
+ }
+ private fun isVideoFile(name:String,mime:String):Boolean =
+  mime.startsWith("video/",true) ||
+   listOf(".mp4",".mkv",".webm",".avi",".mov",".m4v",".3gp").any{name.endsWith(it,true)}
+ private fun openDownloadedFile(uri:Uri,name:String,mime:String){
+  val intent=if(isVideoFile(name,mime)){
+   Intent(this,VideoPlayerActivity::class.java).apply{
+    data=uri
+    putExtra("video_title",name)
+    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+   }
+  }else{
+   Intent(Intent.ACTION_VIEW).apply{
+    setDataAndType(uri,mime.ifBlank{"*/*"})
+    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+   }
+  }
+  runCatching{startActivity(intent)}.onFailure{
+   Toast.makeText(this,"No compatible player for this file",Toast.LENGTH_LONG).show()
+  }
+ }
  private fun createWebView():WebView{
   val w=WebView(this)
   w.settings.apply{javaScriptEnabled=true;domStorageEnabled=true;databaseEnabled=true;setSupportMultipleWindows(true);javaScriptCanOpenWindowsAutomatically=true;useWideViewPort=true;loadWithOverviewMode=true;mediaPlaybackRequiresUserGesture=false}
@@ -341,6 +452,29 @@ class MainActivity:AppCompatActivity(){
    w.settings.userAgentString=w.settings.userAgentString.replace("Mobile ","").replace("; wv","")
   }
   CookieManager.getInstance().apply{setAcceptCookie(true);setAcceptThirdPartyCookies(w,true)}
+  // Edge swipes navigate history. A deliberate downward pull at page top refreshes.
+  var touchX=0f
+  var touchY=0f
+  w.setOnTouchListener{_,event->
+   when(event.actionMasked){
+    MotionEvent.ACTION_DOWN->{touchX=event.x;touchY=event.y;false}
+    MotionEvent.ACTION_UP->{
+     val dx=event.x-touchX
+     val dy=event.y-touchY
+     val edge=32.dp().toFloat()
+     when{
+      kotlin.math.abs(dx)>96.dp() && kotlin.math.abs(dy)<75.dp() &&
+       touchX<edge && dx>0 && w.canGoBack()->{w.goBack();true}
+      kotlin.math.abs(dx)>96.dp() && kotlin.math.abs(dy)<75.dp() &&
+       touchX>w.width-edge && dx<0 && w.canGoForward()->{w.goForward();true}
+      w.scrollY<=0 && dy>145.dp() && kotlin.math.abs(dx)<65.dp() &&
+       touchY>65.dp() && touchY<w.height*0.65f->{w.reload();true}
+      else->false
+     }
+    }
+    else->false
+   }
+  }
   // Positive scroll delta = content moving upwards: hide app chrome.
   // Negative scroll delta = content moving downwards: reveal chrome again.
   var scrollDistance=0
@@ -363,10 +497,23 @@ class MainActivity:AppCompatActivity(){
   }
   w.webViewClient=object:WebViewClient(){
    override fun onPageStarted(view:WebView,url:String?,favicon:android.graphics.Bitmap?){
-    if(tabs.getOrNull(active)===view)updateAddressBar()
+    if(tabs.getOrNull(active)===view){clearOfflinePage();updateAddressBar()}
    }
    override fun onPageFinished(view:WebView,url:String?){
-    if(tabs.getOrNull(active)===view)updateAddressBar()
+    if(tabs.getOrNull(active)===view){
+     updateAddressBar()
+     view.postDelayed({captureTabPreview(view)},450)
+    }
+   }
+   override fun onReceivedError(view:WebView,request:WebResourceRequest,error:WebResourceError){
+    super.onReceivedError(view,request,error)
+    if(request.isForMainFrame)
+     showOfflinePage(view,request.url.toString(),error.description?.toString()?:"Could not reach server")
+   }
+   override fun onReceivedHttpError(view:WebView,request:WebResourceRequest,response:WebResourceResponse){
+    super.onReceivedHttpError(view,request,response)
+    if(request.isForMainFrame && response.statusCode>=500)
+     showOfflinePage(view,request.url.toString(),"Server error " + response.statusCode)
    }
    override fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest):Boolean{
     val uri=request.url
@@ -375,6 +522,11 @@ class MainActivity:AppCompatActivity(){
    }
   }
   w.webChromeClient=object:WebChromeClient(){
+   override fun onShowCustomView(view:View,callback:CustomViewCallback){
+    enterHtmlFullscreen(view,callback)
+   }
+   override fun onHideCustomView(){exitHtmlFullscreen()}
+
    override fun onCreateWindow(view:WebView,isDialog:Boolean,isUserGesture:Boolean,resultMsg:android.os.Message):Boolean{
     if(!isUserGesture)return false
     val child=createWebView()
@@ -417,7 +569,8 @@ class MainActivity:AppCompatActivity(){
  }
  private fun activate(index:Int){
   if(index !in tabs.indices)return
-  active=index;container.removeAllViews()
+  tabs.getOrNull(active)?.let{captureTabPreview(it)}
+  active=index;clearOfflinePage();container.removeAllViews()
   val w=tabs[index];(w.parent as? android.view.ViewGroup)?.removeView(w)
   container.addView(w,FrameLayout.LayoutParams(-1,-1));updateCount();updateAddressBar();setChromeVisible(true)
  }
@@ -429,6 +582,7 @@ class MainActivity:AppCompatActivity(){
   tabs.toList().filter{it!==current}.forEach{other->
    (other.parent as? android.view.ViewGroup)?.removeView(other)
    other.stopLoading()
+   tabPreviews.remove(other)
    other.destroy()
   }
   tabs.clear()
@@ -441,7 +595,7 @@ class MainActivity:AppCompatActivity(){
  private fun closeTab(index:Int){
   if(index !in tabs.indices)return
   val w=tabs.removeAt(index)
-  (w.parent as? android.view.ViewGroup)?.removeView(w);w.destroy()
+  (w.parent as? android.view.ViewGroup)?.removeView(w);tabPreviews.remove(w);w.destroy()
   if(tabs.isEmpty()){openTab(getSharedPreferences("web_settings",MODE_PRIVATE).getString("homepage",home)?:home,true);return}
   if(index<active)active--
   if(index==active||active>=tabs.size)active=active.coerceAtMost(tabs.lastIndex)
@@ -512,6 +666,7 @@ class MainActivity:AppCompatActivity(){
   if(::currentUrlLabel.isInitialized)currentUrlLabel.text=tabs.getOrNull(active)?.url?:home
  }
  private fun showTabs(){
+  tabs.getOrNull(active)?.let{captureTabPreview(it)}
   val panel=LinearLayout(this).apply{
    orientation=LinearLayout.VERTICAL;setPadding(20.dp(),20.dp(),20.dp(),22.dp())
    setBackgroundColor(Color.BLACK)
@@ -562,6 +717,19 @@ class MainActivity:AppCompatActivity(){
     setPadding(15.dp(),14.dp(),12.dp(),14.dp())
     background=rounded(if(index==active)0xff103037.toInt() else 0xff151D20.toInt(),18,
      if(index==active)0xff00E5EE.toInt() else 0xff263338.toInt())
+   }
+   val preview=tabPreviews[w]
+   if(preview!=null){
+    row.addView(ImageView(this).apply{
+     setImageBitmap(preview);scaleType=ImageView.ScaleType.CENTER_CROP
+     background=rounded(0xff273338.toInt(),12)
+    },LinearLayout.LayoutParams(94.dp(),76.dp()).apply{marginEnd=12.dp()})
+   }else{
+    row.addView(TextView(this).apply{
+     text="◎";textSize=30f;gravity=android.view.Gravity.CENTER
+     setTextColor(0xff00E5EE.toInt())
+     background=rounded(0xff202C31.toInt(),12)
+    },LinearLayout.LayoutParams(94.dp(),76.dp()).apply{marginEnd=12.dp()})
    }
    val textColumn=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
    textColumn.addView(TextView(this).apply{
@@ -745,7 +913,7 @@ class MainActivity:AppCompatActivity(){
   var id=System.currentTimeMillis()
   while(transfers.containsKey(id))id++
   val transfer=Transfer(id,video.url,name,mime,
-   page.settings.userAgentString?:"",CookieManager.getInstance().getCookie(video.url)?:"")
+   page.settings.userAgentString?:"",CookieManager.getInstance().getCookie(video.url)?:"",page.url?:"")
   transfers[id]=transfer
   persistTransfer(transfer)
   startTransfer(transfer)
@@ -836,13 +1004,8 @@ class MainActivity:AppCompatActivity(){
       actions.addView(TextView(this@MainActivity).apply{text="▶ Resume";styleDownloadAction(this,1);setOnClickListener{startTransfer(t)}})
      }
      if(t.state=="Completed"&&t.uri.startsWith("content://")){
-      actions.addView(TextView(this@MainActivity).apply{text="Open";styleDownloadAction(this,1);setOnClickListener{
-       runCatching{
-        startActivity(Intent(Intent.ACTION_VIEW).apply{
-         setDataAndType(Uri.parse(t.uri),t.mime.ifBlank{"*/*"})
-         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        })
-       }.onFailure{Toast.makeText(this@MainActivity,"No app available to open this file",Toast.LENGTH_LONG).show()}
+      actions.addView(TextView(this@MainActivity).apply{text=if(isVideoFile(t.filename,t.mime))"▶ Play" else "Open";styleDownloadAction(this,1);setOnClickListener{
+       openDownloadedFile(Uri.parse(t.uri),t.filename,t.mime)
       }})
      }
      actions.addView(TextView(this@MainActivity).apply{text="× Remove";styleDownloadAction(this,2);setOnClickListener{removeTransfer(t)}})
@@ -919,9 +1082,9 @@ class MainActivity:AppCompatActivity(){
        }
        val actions=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.HORIZONTAL}
        if(status==DownloadManager.STATUS_SUCCESSFUL){
-        actions.addView(TextView(this@MainActivity).apply{text="Open";styleDownloadAction(this,1);setOnClickListener{
+        actions.addView(TextView(this@MainActivity).apply{text=if(isVideoFile(info.first,""))"▶ Play" else "Open";styleDownloadAction(this,1);setOnClickListener{
          val uri=downloadManager.getUriForDownloadedFile(id)
-         if(uri!=null)runCatching{startActivity(Intent(Intent.ACTION_VIEW).apply{setDataAndType(uri,c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_MEDIA_TYPE))?:"*/*");addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)})}.onFailure{Toast.makeText(this@MainActivity,"No app can open this file",Toast.LENGTH_SHORT).show()}
+         if(uri!=null)openDownloadedFile(uri,info.first,c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_MEDIA_TYPE))?:"*/*")
         }})
        }
        actions.addView(TextView(this@MainActivity).apply{text="Remove";styleDownloadAction(this,2);setOnClickListener{
@@ -1035,6 +1198,8 @@ class MainActivity:AppCompatActivity(){
 # A true foreground service handles downloads after the activity is left or replaced.
 service=src/'java/com/webtoapp/template/DownloadService.kt'
 service.write_text((Path(__file__).with_name('download_service.kt')).read_text())
+player=src/'java/com/webtoapp/template/VideoPlayerActivity.kt'
+player.write_text((Path(__file__).with_name('video_player.kt')).read_text())
 layout.write_text('''<?xml version="1.0" encoding="utf-8"?><androidx.swiperefreshlayout.widget.SwipeRefreshLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/swipeRefresh" android:layout_width="match_parent" android:layout_height="match_parent"><WebView android:id="@+id/webView" android:layout_width="match_parent" android:layout_height="match_parent" /></androidx.swiperefreshlayout.widget.SwipeRefreshLayout>''')
 s=manifest.read_text()
 if 'android.permission.FOREGROUND_SERVICE_DATA_SYNC' not in s:
@@ -1043,6 +1208,10 @@ if 'android.permission.FOREGROUND_SERVICE_DATA_SYNC' not in s:
      '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n'
      '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />\n'
      '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />')
+if 'android:name=".VideoPlayerActivity"' not in s:
+    s=s.replace('</application>','<activity android:name=".VideoPlayerActivity" '
+     'android:exported="false" android:supportsPictureInPicture="true" '
+     'android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|uiMode" />\n    </application>')
 if 'android:name=".DownloadService"' not in s:
     s=s.replace('</application>','<service android:name=".DownloadService" android:exported="false" '
      'android:foregroundServiceType="dataSync" />\n    </application>')
