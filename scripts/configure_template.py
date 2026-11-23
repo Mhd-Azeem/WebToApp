@@ -951,19 +951,36 @@ class MainActivity:AppCompatActivity(){
   scroll.addView(list)
   root.addView(heading)
   val historyActions=TextView(this).apply{
-   text="History  ·  Clear completed"
+   text="Manage downloads  ·  Retry failed / Clear completed"
    setTextColor(0xff00E5EE.toInt());textSize=14f
    setPadding(8.dp(),8.dp(),8.dp(),12.dp())
    setOnClickListener{
-    val finished=downloads.keys.filter{id->
-     runCatching{downloadManager.query(DownloadManager.Query().setFilterById(id))}.getOrNull()?.use{cursor->
-      if(!cursor.moveToFirst())true else {
-       val state=cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-       state==DownloadManager.STATUS_SUCCESSFUL||state==DownloadManager.STATUS_FAILED
+    AlertDialog.Builder(this@MainActivity)
+     .setTitle("Download manager")
+     .setItems(arrayOf("Retry failed downloads","Clear completed history")){_,which->
+      if(which==0){
+       refreshTransfers()
+       val failed=transfers.values.filter{it.state.startsWith("Failed")}
+       failed.forEach{startTransfer(it)}
+       Toast.makeText(this@MainActivity,failed.size.toString()+" downloads queued",Toast.LENGTH_SHORT).show()
+      }else{
+       refreshTransfers()
+       transfers.values.filter{it.state=="Completed"}.toList().forEach{removeTransfer(it)}
+       val finished=downloads.keys.filter{id->
+        runCatching{downloadManager.query(DownloadManager.Query().setFilterById(id))}.getOrNull()?.use{cursor->
+         if(!cursor.moveToFirst())true else {
+          val state=cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+          state==DownloadManager.STATUS_SUCCESSFUL||state==DownloadManager.STATUS_FAILED
+         }
+        }?:true
+       }
+       finished.forEach{id->
+        downloads.remove(id)
+        getSharedPreferences("app_downloads",MODE_PRIVATE).edit().remove(id.toString()).apply()
+       }
+       Toast.makeText(this@MainActivity,"Completed history cleared; saved files were kept",Toast.LENGTH_SHORT).show()
       }
-     }?:true
-    }
-    finished.forEach{id->downloads.remove(id);getSharedPreferences("app_downloads",MODE_PRIVATE).edit().remove(id.toString()).apply()}
+     }.setNegativeButton("Cancel",null).show()
    }
   }
   root.addView(historyActions)
