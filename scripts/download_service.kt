@@ -171,8 +171,11 @@ class DownloadService : Service() {
   if(running.containsKey(id)) return
   val raw = metadata.getString(id.toString(), null)
   if(raw == null) { stopIfIdle(); return }
-  val fields = raw.split(31.toChar())
-  if(fields.size != 5) {
+  // Read both current U+001F metadata and older literal "\\u001f" entries.
+  val fields = raw.split(31.toChar()).let { separated ->
+   if(separated.size >= 5) separated else raw.split(92.toChar().toString() + "u001f")
+  }
+  if(fields.size < 5) {
    saveStatus(id, "Failed: Invalid download metadata")
    stopIfIdle()
    return
@@ -184,7 +187,7 @@ class DownloadService : Service() {
   }
   val task = Task(id)
   if(running.putIfAbsent(id, task) != null) return
-  saveStatus(id, "Downloading", done = File(cacheDir,"transfer_" + id + ".part").length())
+  saveStatus(id, "Connecting", done = File(cacheDir,"transfer_" + id + ".part").length())
   refreshNotification(true)
   Thread({
    try {
@@ -224,13 +227,14 @@ class DownloadService : Service() {
  /** Resume partial downloads. If a server ignores Range, restart safely at byte 0. */
  private fun transfer(task:Task, fields:List<String>):Triple<String,String,Uri> {
   val (url,name,mime,agent,cookie)=fields
+  val referer=fields.getOrElse(5){""}
   val file = File(cacheDir,"transfer_" + task.id + ".part")
   var attempt = 0
   while(true) {
    if(task.cancelled) throw IOException("Download cancelled")
    attempt++
    var offset = if(file.exists())file.length() else 0L
-   var conn = openConnection(url,agent,cookie,offset)
+   var conn = openConnection(url,agent,cookie,referer,offset)
    task.connection = conn
    try {
     var code = conn.responseCode
@@ -239,11 +243,28 @@ class DownloadService : Service() {
      conn.disconnect()
      offset=0
      file.delete()
-     conn=openConnection(url,agent,cookie,0)
+     conn=openConnection(url,agent,cookie,referer,0)
      task.connection=conn
      code=conn.responseCode
     }
-    if(code != 200 && code != 206) throw IOException("HTTP " + code)
+    if(code != 200 && code != 206) {
+     val explanation=when(code){
+      401->"Login required or session expired"
+      403->"Access denied by file server; try opening the link again"
+      404,410->"File link missing or expired"
+      429->"Server rate limit"
+      in 500..599->"File server temporarily unavailable"
+      else->"Server refused the download"
+     }
+     throw IOException("HTTP " + code + ": " + explanation)
+    }
+    val responseType=conn.contentType?.substringBefore(';')?.trim()?.lowercase(java.util.Locale.ROOT).orEmpty()
+    val extension=name.substringAfterLast('.',"").lowercase(java.util.Locale.ROOT)
+    val expectsBinary=extension in setOf("mp4","mkv","webm","avi","mov","mp3","pdf","zip","rar","apk","7z")
+      || mime.startsWith("video/") || mime.startsWith("audio/")
+    if(responseType=="text/html" && expectsBinary)
+     throw IOException("Server returned an HTML page instead of the requested file; reopen the download link")
+
     if(code == 206) {
      val range = conn.getHeaderField("Content-Range") ?: ""
      if(!range.startsWith("bytes " + offset + "-")) throw IOException("Server returned wrong resume range")
@@ -281,7 +302,13 @@ class DownloadService : Service() {
    } catch(e:Exception) {
     if(task.cancelled)throw e
     if(attempt>=3)throw e
-    saveStatus(task.id, "Retrying",done=file.length())
+    // Do not endlessly retry auth failures and expired links.
+    if(e.message?.startsWith("HTTP 401:")==true ||
+       e.message?.startsWith("HTTP 403:")==true ||
+       e.message?.startsWith("HTTP 404:")==true ||
+       e.message?.startsWith("HTTP 410:")==true ||
+       e.message?.contains("HTML page instead")==true)throw e
+    saveStatus(task.id, "Retrying: " + (e.message ?: "network error"),done=file.length())
     Thread.sleep((attempt*1500).toLong())
    } finally {
     conn.disconnect()
@@ -290,11 +317,15 @@ class DownloadService : Service() {
   }
  }
 
- private fun openConnection(url:String,agent:String,cookie:String,offset:Long):HttpURLConnection {
+ private fun openConnection(url:String,agent:String,cookie:String,referer:String,offset:Long):HttpURLConnection {
   return (URL(url).openConnection() as HttpURLConnection).apply {
    connectTimeout=20000;readTimeout=20000;instanceFollowRedirects=true
    setRequestProperty("User-Agent",agent)
    if(cookie.isNotBlank())setRequestProperty("Cookie",cookie)
+   if(referer.startsWith("https://") || referer.startsWith("http://"))
+    setRequestProperty("Referer",referer)
+   setRequestProperty("Accept","*/*")
+   setRequestProperty("Accept-Encoding","identity")
    if(offset>0)setRequestProperty("Range","bytes=" + offset + "-")
   }
  }
