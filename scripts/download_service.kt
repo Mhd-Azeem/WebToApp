@@ -90,7 +90,7 @@ class DownloadService : Service() {
    }
    intent == null -> { // START_STICKY restart after process termination
     val pending = statuses.all.filter { (_, value) ->
-     try { JSONObject(value as String).optString("state") == "Downloading" } catch(_:Exception) { false }
+     try { val state=JSONObject(value as String).optString("state"); state=="Downloading" || state=="Connecting" || state.startsWith("Retrying") || state=="Saving file" } catch(_:Exception) { false }
     }.keys.mapNotNull { it.toLongOrNull() }
     if(pending.isEmpty()) stopSelf()
     else if(startForegroundSafely()) pending.forEach { startTask(it) }
@@ -102,19 +102,41 @@ class DownloadService : Service() {
  }
 
  private fun notification(): Notification {
-  val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
+  val open = PendingIntent.getActivity(this,0,Intent(this,MainActivity::class.java),
    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-  val count = running.size
-  return NotificationCompat.Builder(this, CHANNEL)
+  val activeIds = running.keys().toList()
+  val count = activeIds.size
+  val builder=NotificationCompat.Builder(this,CHANNEL)
    .setSmallIcon(android.R.drawable.stat_sys_download)
-   .setContentTitle(if(count == 1) "Downloading in background" else "Background downloads")
-   .setContentText(if(count == 1) "Download continues while you use other apps" else count.toString() + " active downloads")
+   .setContentTitle(if(count==1)"Downloading file" else "Background downloads")
    .setContentIntent(open)
-   .setOngoing(true)
+   .setOngoing(count>0)
    .setOnlyAlertOnce(true)
    .setPriority(NotificationCompat.PRIORITY_LOW)
    .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-   .build()
+  if(count==1) {
+   val id=activeIds.first()
+   val status=try{JSONObject(statuses.getString(id.toString(),"{}")?:"{}")}catch(_:Exception){JSONObject()}
+   val raw=metadata.getString(id.toString(),"")?:""
+   val fields=raw.split(31.toChar()).let { if(it.size>=5)it else raw.split(92.toChar().toString()+"u001f") }
+   val filename=fields.getOrElse(1){"Download"}
+   val done=status.optLong("done",0L)
+   val size=status.optLong("size",-1L)
+   val state=status.optString("state","Connecting")
+   builder.setContentTitle(filename.take(48))
+    .setContentText(state+" • "+(done/1024L).toString()+" KB"+if(size>0)" / "+(size/1024L).toString()+" KB" else "")
+   if(size>0L)builder.setProgress(100,((done.toDouble()*100)/size).toInt().coerceIn(0,100),false)
+   else builder.setProgress(0,0,true)
+   val pause=Intent(this,DownloadService::class.java).apply{
+    action=ACTION_PAUSE;putExtra(EXTRA_ID,id)
+   }
+   builder.addAction(android.R.drawable.ic_media_pause,"Pause",
+    PendingIntent.getService(this,(id%100000).toInt(),pause,
+     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+  } else {
+   builder.setContentText(count.toString()+" active transfers")
+  }
+  return builder.build()
  }
 
  @Synchronized private fun startForegroundSafely(): Boolean {
@@ -301,15 +323,23 @@ class DownloadService : Service() {
     return Triple(name,mime,uri)
    } catch(e:Exception) {
     if(task.cancelled)throw e
-    if(attempt>=3)throw e
+    if(attempt>=5)throw e
     // Do not endlessly retry auth failures and expired links.
     if(e.message?.startsWith("HTTP 401:")==true ||
        e.message?.startsWith("HTTP 403:")==true ||
        e.message?.startsWith("HTTP 404:")==true ||
        e.message?.startsWith("HTTP 410:")==true ||
        e.message?.contains("HTML page instead")==true)throw e
-    saveStatus(task.id, "Retrying: " + (e.message ?: "network error"),done=file.length())
-    Thread.sleep((attempt*1500).toLong())
+    val waitMs=(1500L shl (attempt-1)).coerceAtMost(12000L)
+    saveStatus(task.id, "Retrying (" + (attempt+1) + "/5) in " + (waitMs/1000L) +
+     "s: " + (e.message ?: "network error"),done=file.length())
+    var remaining=waitMs
+    while(remaining>0 && !task.cancelled){
+     val step=remaining.coerceAtMost(500L)
+     Thread.sleep(step)
+     remaining-=step
+    }
+    if(task.cancelled)throw IOException("Download paused")
    } finally {
     conn.disconnect()
     task.connection = null
@@ -320,7 +350,7 @@ class DownloadService : Service() {
  private fun openConnection(url:String,agent:String,cookie:String,referer:String,offset:Long):HttpURLConnection {
   return (URL(url).openConnection() as HttpURLConnection).apply {
    connectTimeout=20000;readTimeout=20000;instanceFollowRedirects=true
-   setRequestProperty("User-Agent",agent)
+   if(agent.isNotBlank())setRequestProperty("User-Agent",agent)
    if(cookie.isNotBlank())setRequestProperty("Cookie",cookie)
    if(referer.startsWith("https://") || referer.startsWith("http://"))
     setRequestProperty("Referer",referer)
