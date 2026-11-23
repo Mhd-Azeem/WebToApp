@@ -64,13 +64,13 @@ class MainActivity:AppCompatActivity(){
  private val home="__WEB_URL__"
  private val downloads=linkedMapOf<Long,Pair<String,Long>>()
  private data class VideoCandidate(val url:String,val title:String,val mime:String)
- private data class Transfer(val id:Long,val url:String,val filename:String,val mime:String,val agent:String,val cookie:String,
+ private data class Transfer(val id:Long,val url:String,val filename:String,val mime:String,val agent:String,val cookie:String,val referer:String="",
   @Volatile var state:String="Paused",@Volatile var size:Long=-1,@Volatile var done:Long=0,
   @Volatile var speed:Long=0,@Volatile var stop:Boolean=false,@Volatile var uri:String="")
  private val transfers=ConcurrentHashMap<Long,Transfer>()
  private fun persistTransfer(t:Transfer){
   getSharedPreferences("resumable_transfers",MODE_PRIVATE).edit().putString(t.id.toString(),
-   listOf(t.url,t.filename,t.mime,t.agent,t.cookie).joinToString("\\u001f")).apply()
+   listOf(t.url,t.filename,t.mime,t.agent,t.cookie,t.referer).joinToString(31.toChar().toString())).apply()
  }
  // The foreground service writes progress to persistent preferences. UI only observes it.
  private fun refreshTransfers(){
@@ -78,9 +78,12 @@ class MainActivity:AppCompatActivity(){
   val progress=getSharedPreferences("transfer_status",MODE_PRIVATE)
   for((key,value) in metadata){
    val id=key.toLongOrNull()?:continue
-   val fields=(value as? String)?.split(31.toChar())?:continue
-   if(fields.size!=5)continue
-   val t=transfers[id]?:Transfer(id,fields[0],fields[1],fields[2],fields[3],fields[4]).also{transfers[id]=it}
+   val raw=(value as? String)?:continue
+   val fields=raw.split(31.toChar()).let{parts->
+    if(parts.size>=5)parts else raw.split(92.toChar().toString()+"u001f")
+   }
+   if(fields.size<5)continue
+   val t=transfers[id]?:Transfer(id,fields[0],fields[1],fields[2],fields[3],fields[4],fields.getOrElse(5){""}).also{transfers[id]=it}
    val status=progress.getString(key,null)
    val info=try{org.json.JSONObject(status?:"{}")}catch(_:Exception){org.json.JSONObject()}
    t.done=info.optLong("done",File(cacheDir,"transfer_" + id + ".part").length())
@@ -100,7 +103,10 @@ class MainActivity:AppCompatActivity(){
    if(foreground)androidx.core.content.ContextCompat.startForegroundService(this,intent)
    else startService(intent)
   }catch(e:Exception){
-   transfers[id]?.state="Failed: " + (e.message?:"cannot start background service")
+   val error="Failed: " + (e.message?:"cannot start background service")
+   transfers[id]?.state=error
+   getSharedPreferences("transfer_status",MODE_PRIVATE).edit().putString(id.toString(),
+    org.json.JSONObject().apply{put("state",error);put("size",-1);put("done",0);put("speed",0)}.toString()).apply()
    Toast.makeText(this,"Download service error: " + e.message,Toast.LENGTH_LONG).show()
   }
  }
@@ -118,7 +124,7 @@ class MainActivity:AppCompatActivity(){
       checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
    requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),2602)
   }
-  t.state="Downloading"
+  t.state="Connecting"
   sendTransferAction(DownloadService.ACTION_START,t.id,true)
  }
 
@@ -395,7 +401,7 @@ class MainActivity:AppCompatActivity(){
     val filename=URLUtil.guessFileName(url,disposition,mime)
     val id=System.currentTimeMillis()
     val transfer=Transfer(id,url,filename,mime?: "",agent?:w.settings.userAgentString,
-     CookieManager.getInstance().getCookie(url)?:"")
+     CookieManager.getInstance().getCookie(url)?:"",w.url?:"")
     transfers[id]=transfer
     persistTransfer(transfer)
     startTransfer(transfer)
@@ -748,6 +754,27 @@ class MainActivity:AppCompatActivity(){
   showDownloads()
  }
 
+ private fun styleDownloadAction(view:TextView,kind:Int){
+  val cyan=0xff00E5EE.toInt()
+  val fill=when(kind){
+   1->cyan                      // Resume / Open
+   2->0xff2A151A.toInt()       // Remove
+   else->0xff112A2C.toInt()    // Pause
+  }
+  val ink=when(kind){
+   1->Color.BLACK
+   2->0xffFF9FA9.toInt()
+   else->cyan
+  }
+  val outline=when(kind){2->0xff78414B.toInt();else->0xff167B80.toInt()}
+  view.apply{
+   textSize=13f;gravity=android.view.Gravity.CENTER
+   setTextColor(ink);setTypeface(null,android.graphics.Typeface.BOLD)
+   setPadding(19.dp(),0,19.dp(),0)
+   background=rounded(fill,22,outline)
+   setMinHeight(44.dp())
+  }
+ }
  private fun showDownloads(){
   val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setBackgroundColor(0xff050809.toInt());setPadding(16.dp(),12.dp(),16.dp(),12.dp())}
   val heading=TextView(this).apply{text="Downloads";setTextColor(Color.WHITE);textSize=23f;setPadding(6.dp(),4.dp(),6.dp(),12.dp())}
@@ -795,21 +822,21 @@ class MainActivity:AppCompatActivity(){
       setTextColor(0xffADBDC1.toInt());textSize=13f
      })
      card.addView(ProgressBar(this@MainActivity,null,android.R.attr.progressBarStyleHorizontal).apply{
-      isIndeterminate=t.size<=0&&t.state=="Downloading";max=100;progress=pct
+      isIndeterminate=t.size<=0&&(t.state=="Downloading"||t.state=="Connecting"||t.state.startsWith("Retrying"));max=100;progress=pct
      })
      val eta=if(t.speed>0&&t.size>t.done)" • ${duration((t.size-t.done)/t.speed)} remaining" else ""
      card.addView(TextView(this@MainActivity).apply{
-      text=if(t.state=="Downloading")"${pretty(t.speed)}/s$eta" else t.state
+      text=if(t.state=="Downloading"&&t.speed>0)"${pretty(t.speed)}/s$eta" else if(t.state=="Downloading"||t.state=="Connecting")"Waiting for server…" else t.state
       setTextColor(0xff00E5EE.toInt());textSize=12f
      })
      val actions=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.HORIZONTAL}
-     if(t.state=="Downloading"||t.state=="Retrying"){
-      actions.addView(Button(this@MainActivity).apply{text="Ⅱ Pause";setOnClickListener{pauseTransfer(t)}})
+     if(t.state=="Downloading"||t.state=="Connecting"||t.state.startsWith("Retrying")||t.state=="Saving file"){
+      actions.addView(TextView(this@MainActivity).apply{text="Ⅱ Pause";styleDownloadAction(this,0);setOnClickListener{pauseTransfer(t)}})
      }else if(t.state.startsWith("Paused")||t.state.startsWith("Failed")){
-      actions.addView(Button(this@MainActivity).apply{text="▶ Resume";setOnClickListener{startTransfer(t)}})
+      actions.addView(TextView(this@MainActivity).apply{text="▶ Resume";styleDownloadAction(this,1);setOnClickListener{startTransfer(t)}})
      }
      if(t.state=="Completed"&&t.uri.startsWith("content://")){
-      actions.addView(Button(this@MainActivity).apply{text="Open";setOnClickListener{
+      actions.addView(TextView(this@MainActivity).apply{text="Open";styleDownloadAction(this,1);setOnClickListener{
        runCatching{
         startActivity(Intent(Intent.ACTION_VIEW).apply{
          setDataAndType(Uri.parse(t.uri),t.mime.ifBlank{"*/*"})
@@ -818,7 +845,10 @@ class MainActivity:AppCompatActivity(){
        }.onFailure{Toast.makeText(this@MainActivity,"No app available to open this file",Toast.LENGTH_LONG).show()}
       }})
      }
-     actions.addView(Button(this@MainActivity).apply{text="× Remove";setOnClickListener{removeTransfer(t)}})
+     actions.addView(TextView(this@MainActivity).apply{text="× Remove";styleDownloadAction(this,2);setOnClickListener{removeTransfer(t)}})
+     for(i in 0 until actions.childCount){
+      actions.getChildAt(i).layoutParams=LinearLayout.LayoutParams(-2,44.dp()).apply{marginEnd=9.dp()}
+     }
      card.addView(actions)
      list.addView(card,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=10.dp()})
     }
@@ -889,17 +919,20 @@ class MainActivity:AppCompatActivity(){
        }
        val actions=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.HORIZONTAL}
        if(status==DownloadManager.STATUS_SUCCESSFUL){
-        actions.addView(Button(this@MainActivity).apply{text="Open";setOnClickListener{
+        actions.addView(TextView(this@MainActivity).apply{text="Open";styleDownloadAction(this,1);setOnClickListener{
          val uri=downloadManager.getUriForDownloadedFile(id)
          if(uri!=null)runCatching{startActivity(Intent(Intent.ACTION_VIEW).apply{setDataAndType(uri,c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_MEDIA_TYPE))?:"*/*");addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)})}.onFailure{Toast.makeText(this@MainActivity,"No app can open this file",Toast.LENGTH_SHORT).show()}
         }})
        }
-       actions.addView(Button(this@MainActivity).apply{text="Remove";setOnClickListener{
+       actions.addView(TextView(this@MainActivity).apply{text="Remove";styleDownloadAction(this,2);setOnClickListener{
         downloadManager.remove(id);downloads.remove(id)
         getSharedPreferences("app_downloads",MODE_PRIVATE).edit().remove(id.toString()).apply()
         dialog.dismiss();showDownloads()
        }})
-       card.addView(actions)
+       for(i in 0 until actions.childCount){
+      actions.getChildAt(i).layoutParams=LinearLayout.LayoutParams(-2,44.dp()).apply{marginEnd=9.dp()}
+     }
+     card.addView(actions)
        list.addView(card,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=10.dp()})
       }
      }
