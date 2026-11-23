@@ -104,7 +104,7 @@ class DownloadService : Service() {
  private fun notification(): Notification {
   val open = PendingIntent.getActivity(this,0,Intent(this,MainActivity::class.java),
    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-  val activeIds = running.keys().toList()
+  val activeIds = running.keys.toList()
   val count = activeIds.size
   val builder=NotificationCompat.Builder(this,CHANNEL)
    .setSmallIcon(android.R.drawable.stat_sys_download)
