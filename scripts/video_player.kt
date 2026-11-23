@@ -29,6 +29,7 @@ import androidx.appcompat.app.AppCompatActivity
 class VideoPlayerActivity : AppCompatActivity() {
  private lateinit var video: VideoView
  private lateinit var controls: LinearLayout
+ private lateinit var mediaControls: MediaController
  private var player: MediaPlayer? = null
  private val speeds = floatArrayOf(0.75f, 1f, 1.25f, 1.5f, 2f)
  private var speedIndex = 1
@@ -62,8 +63,8 @@ class VideoPlayerActivity : AppCompatActivity() {
    }
   }
   root.addView(video, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
-  val controller = MediaController(this).apply { setAnchorView(video) }
-  video.setMediaController(controller)
+  mediaControls = MediaController(this).apply { setAnchorView(video) }
+  video.setMediaController(mediaControls)
   controls = LinearLayout(this).apply {
    orientation = LinearLayout.HORIZONTAL
    gravity = Gravity.CENTER_VERTICAL
@@ -90,11 +91,11 @@ class VideoPlayerActivity : AppCompatActivity() {
   video.requestFocus()
  }
  private fun showController() {
-  (video.parent as? View)?.performClick()
+  mediaControls.show(4000)
  }
  private fun setSpeed(speed: Float) {
   if(Build.VERSION.SDK_INT >= 23) {
-   try { player?.playbackParams = player?.playbackParams?.setSpeed(speed) ?: return }
+   try { player?.let { mp -> mp.playbackParams = mp.playbackParams.setSpeed(speed) } }
    catch(_: Exception) { Toast.makeText(this, "Playback speed not supported", Toast.LENGTH_SHORT).show() }
   }
  }
