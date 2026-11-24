@@ -416,7 +416,7 @@ class DownloadService : Service() {
      // Protect partial data for transfers created by previous app versions too.
      if(code==416){
       val advertised=conn.getHeaderField("Content-Range")?:""
-      if(advertised.substringAfter("*/","").toLongOrNull()==offset){
+      if(advertised.substringAfter("*/","").toLongOrNull()==offset && known==offset){
        saveStatus(task.id,"Saving file",offset,offset)
        return Triple(name,mime,publishFile(file,name,mime))
       }
@@ -446,7 +446,11 @@ class DownloadService : Service() {
      if(!range.startsWith("bytes " + offset + "-")) throw IOException("Server returned wrong resume range")
     }
     val length = conn.contentLengthLong
-    val total = if(length >= 0)offset + length else -1L
+    val rangeTotal=if(code==206)conn.getHeaderField("Content-Range")?.substringAfter("/")?.toLongOrNull() ?: -1L else length
+    val saved=JSONObject(statuses.getString(task.id.toString(),"{}")?:"{}").optLong("size",-1L)
+    if(saved>0L && rangeTotal>0L && saved!=rangeTotal)throw IOException("Remote file size changed")
+    val total=if(saved>0L)saved else rangeTotal
+    if(total<=0L)throw IOException("Cannot verify full file size")
     var done = offset
     var lastTime = SystemClock.elapsedRealtime()
     var lastBytes = offset
@@ -657,9 +661,9 @@ class DownloadService : Service() {
    val previousBytes=previous.optLong("done",0L)
    if(offset==0L && previousBytes>0L)
     throw IOException("Stored partial file was lost or reset; refusing to overwrite $previousBytes previously downloaded bytes")
-   val expected=previous.optLong("size",-1L)
+   val expected=previous.optLong("size",-1L).takeIf{it>0L} ?: fields.getOrElse(6){""}.toLongOrNull() ?: -1L
    // After a complete transfer, never fetch 2+ GB again just because publishing failed.
-   if(expected>0L && offset==expected){
+   if(expected>0L && offset==expected && previous.optString("state")=="Saving file"){
     saveStatus(task.id,"Saving file",expected,offset)
     return Triple(name,mime,finishDestination(task.id,dest,name,mime))
    }
@@ -675,7 +679,8 @@ class DownloadService : Service() {
      if(code==416){
       val advertised=conn.getHeaderField("Content-Range")?:""
       val serverSize=advertised.substringAfter("*/","").toLongOrNull()
-      if(serverSize!=null&&serverSize==offset){
+      if(serverSize!=null&&serverSize==offset && expected==offset){
+       verifySha256(dest,priorValidator.optString("sha256",""))
        saveStatus(task.id,"Saving file",offset,offset)
        return Triple(name,mime,finishDestination(task.id,dest,name,mime))
       }
@@ -688,6 +693,7 @@ class DownloadService : Service() {
     }
     if(code!=200 && code!=206)throw IOException("HTTP "+code+" downloading file")
     var advertisedTotal=-1L
+    var rangeLength=-1L
     if(code==206){
      val range=conn.getHeaderField("Content-Range")?:""
      val bytes=range.removePrefix("bytes ").substringBefore('/')
@@ -697,6 +703,7 @@ class DownloadService : Service() {
      if(!range.startsWith("bytes ") || first!=offset || last==null || last<offset ||
         (advertisedTotal>0L && last>=advertisedTotal))
       throw IOException("Invalid Content-Range: refusing to join different file bytes")
+     rangeLength=last-offset+1L
      val newTag=conn.getHeaderField("ETag")?:""
      val newModified=conn.getHeaderField("Last-Modified")?:""
      if(strongTag.isNotBlank() && newTag.isNotBlank() && strongTag!=newTag)
@@ -719,8 +726,13 @@ class DownloadService : Service() {
      mime.startsWith("video/") || mime.startsWith("audio/")
     if(isBinary && type=="text/html")throw IOException("Server returned a webpage instead of file data")
     val length=conn.contentLengthLong
-    val total=if(advertisedTotal>0L)advertisedTotal
-     else if(length>=0L)offset+length else -1L
+    if(code==206 && length>=0L && length!=rangeLength)
+     throw IOException("Invalid Content-Range: response length mismatch")
+    val reportedTotal=if(code==206)advertisedTotal else length
+    if(expected>0L && reportedTotal>0L && expected!=reportedTotal)
+     throw IOException("Remote file size changed; expected $expected bytes, server reports $reportedTotal")
+    val total=if(expected>0L)expected else reportedTotal
+    if(total<=0L)throw IOException("Cannot verify full file size; download not finalized")
     if(code==206 && advertisedTotal>0L && length>=0L && offset+length>advertisedTotal)
      throw IOException("Server returned more bytes than the advertised file length")
     ensureFreeStorage(if(total>0L)total-offset else -1L)
@@ -737,6 +749,7 @@ class DownloadService : Service() {
       while(!task.cancelled){
        val n=input.read(buf)
        if(n<0)break
+       if(n.toLong()>total-done)throw IOException("Response exceeds expected file size")
        write(buf,n)
        done+=n
        if(bandwidth>0L){
@@ -798,7 +811,7 @@ class DownloadService : Service() {
        e.message?.startsWith("Cannot create a writable download file")==true)throw e
     val retryDelay=(1500L shl (attempt-1)).coerceAtMost(12000L)
     saveStatus(task.id,"Retrying ("+(attempt+1)+"/5): "+(e.message?:"connection problem"),
-     totalSafe(targetLength(dest)))
+     current.optLong("size",-1L),targetLength(dest))
     Thread.sleep(retryDelay)
    }finally{
     conn.disconnect()
