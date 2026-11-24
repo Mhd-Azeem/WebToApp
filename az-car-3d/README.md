@@ -99,5 +99,24 @@ or the joystick. Use **Shift** to sprint, **Space** to jump and **C** to
 crouch. Drag the right mouse button or swipe the free camera area to orbit.
 Scroll to zoom on desktop. Approach the driver door and press **T** to resume
 driving, or approach the opposite door and use **Shift+T** to sit as a
-passenger. Settings lets you select either adult character. See
+passenger. Settings lets you select either adult character and one of four hairstyles. See
 [asset attribution](assets/humans/ATTRIBUTION.md) for model and animation sources.
+
+On foot, press **G** or tap **Interact** near a pedestrian to greet them,
+ask for directions or talk. Familiar pedestrians can agree to ride when
+the car is parked nearby. Stop and press **Shift+G** to let a passenger out
+on desktop. On mobile, exit the car and use **Interact** nearby. Pedestrian
+appearances reuse two stylized rigs with tint and height variation. City
+pedestrians use authored sidewalk routes with crossing checks and the nearby
+population responds to weather and graphics quality.
+
+The Fort Tea Room and Paddy Lane Grocer can be entered on foot. Their
+furniture loads as you approach and is freed after leaving. Interact inside
+at the counter to pay with the existing credits. Rain darkens asphalt and
+reduces grip. City lamp meshes emit at night and footsteps use surface variants.
+
+This expansion still needs physical Android validation. The built-in traffic
+fleet and map remain the v0.7 base for further additions. Shop interiors,
+seating and door transitions use simplified game meshes. The Android workflow
+retains the signed APK and logs as an Actions artifact before checking whether
+the signing certificate matches the historical v0.7 release.

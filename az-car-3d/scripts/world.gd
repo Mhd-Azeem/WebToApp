@@ -3,8 +3,12 @@ const G = preload("res://scripts/geometry.gd")
 const STREET_X := [-96.0, 0.0, 96.0]
 const STREET_Z := [-160.0, -80.0, 0.0, 80.0, 160.0]
 var landmark_count := 0
+var streetlight_material: StandardMaterial3D
 
 func _ready() -> void:
+	streetlight_material=G.material("",Color(0.95,0.86,0.64))
+	streetlight_material.emission=Color(1.0,0.83,0.50)
+	streetlight_material.emission_energy_multiplier=1.7
 	var ground := G.material("concrete", Color(0.74,0.77,0.66))
 	G.box(self, Vector3(10,-0.35,0), Vector3(380,0.5,410), ground, true)
 	var asphalt := G.material("asphalt")
@@ -148,7 +152,7 @@ func _lamp(pos: Vector3) -> void:
 	var m := G.material("",Color(0.14,0.17,0.17))
 	G.box(self,pos+Vector3(0,3,0),Vector3(0.13,6,0.13),m)
 	G.box(self,pos+Vector3(-0.7,6,0),Vector3(1.5,0.12,0.12),m)
-	G.box(self,pos+Vector3(-1.3,5.9,0),Vector3(0.7,0.12,0.4),G.material("",Color(0.95,0.86,0.64)))
+	G.box(self,pos+Vector3(-1.3,5.9,0),Vector3(0.7,0.12,0.4),streetlight_material)
 
 func _palm(pos: Vector3) -> void:
 	G.box(self,pos+Vector3(0,3,0),Vector3(0.4,6,0.4),G.material("plaster",Color(0.48,0.39,0.23)))

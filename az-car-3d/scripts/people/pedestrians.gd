@@ -25,6 +25,8 @@ var actors: Array[Dictionary] = []
 var panel: PanelContainer
 var dialogue: Label
 var active_index := -1
+var rider := -1
+var mobility: Node
 var relationships := ConfigFile.new()
 var population_center := Vector2i(999,999)
 
@@ -42,7 +44,7 @@ func setup(layer: CanvasLayer, vehicle: VehicleBody3D) -> void:
 	dialogue.autowrap_mode=TextServer.AUTOWRAP_WORD_SMART
 	dialogue.custom_minimum_size=Vector2(380,68)
 	contents.add_child(dialogue)
-	for title in ["Greet","Ask for directions","Talk","Close"]:
+	for title in ["Greet","Ask for directions","Talk","Invite as passenger","Close"]:
 		var button := Button.new()
 		button.text=title
 		button.custom_minimum_size.y=42
@@ -65,7 +67,7 @@ func _add_actor(index: int) -> void:
 	body.add_child(shape)
 	var model := HumanModel.new()
 	body.add_child(model)
-	model.dress(1-index%2,PEOPLE[index][3])
+	model.dress(1-index%2,PEOPLE[index][3],(2 if index%4==0 else 3) if index%2==0 else (0 if index%4==1 else 1))
 	model.scale=Vector3(1.0,PEOPLE[index][4],1.0)
 	actors.append({"body":body,"model":model,"route":PackedVector3Array(),"target":0,"wait":0.0,"stuck":0.0})
 
@@ -109,11 +111,12 @@ func _refresh() -> void:
 	var cell := Vector2i(floori(p.x/80.0),floori(p.z/80.0))
 	for index in range(count):
 		if index>=actors.size(): _add_actor(index)
+		if index==rider: continue
 		var actor := actors[index]
 		if not actor.body.visible or (cell!=population_center and actor.body.position.distance_to(p)>61.0):
 			_place(index,cell)
 	for index in range(count,actors.size()):
-		if actors[index].body.visible: _unspawn(actors[index])
+		if index!=rider and actors[index].body.visible: _unspawn(actors[index])
 	population_center=cell
 	if active_index>=0 and (not actors[active_index].body.visible or actors[active_index].body.position.distance_to(p)>4.5):
 		respond("Close")
@@ -125,7 +128,10 @@ func _physics_process(delta: float) -> void:
 		area_tick=0
 		_refresh()
 	for i in range(actors.size()):
-		if actors[i].body.visible: _move(i,delta)
+		if i==rider:
+			actors[i].body.global_position=car.to_global(mobility.PASSENGER)
+			actors[i].model.rotation.y=car.global_rotation.y
+		elif actors[i].body.visible: _move(i,delta)
 
 func _move(i: int, delta: float) -> void:
 	var actor := actors[i]
@@ -178,7 +184,7 @@ func nearby() -> int:
 	var nearest := -1
 	var best := 2.7
 	for i in range(actors.size()):
-		if not actors[i].body.visible: continue
+		if i==rider or not actors[i].body.visible: continue
 		var distance: float=actors[i].body.position.distance_to(focus.position)
 		if distance<best:
 			best=distance
@@ -205,6 +211,9 @@ func respond(action: String) -> void:
 	if active_index<0: return
 	var person: Array=PEOPLE[active_index]
 	var points := int(relationships.get_value("friendship",person[0],0))
+	if action=="Invite as passenger":
+		_invite(points)
+		return
 	match action:
 		"Greet": dialogue.text="%s: %s" % [person[0],"Good to see you again." if points>=2 else "Hello. How's your day going?"]
 		"Ask for directions": dialogue.text="%s: %s" % [person[0],person[2]]
@@ -215,3 +224,37 @@ func respond(action: String) -> void:
 			dialogue.text="%s: %s" % [person[0],"The shops stay busy until evening." if person[1]=="shopkeeper" else "It's usually quieter here after sunset."]
 	relationships.set_value("friendship",person[0],mini(5,points+1))
 	relationships.save("user://az_pedestrians.cfg")
+
+func _invite(points: int) -> void:
+	var name: String=PEOPLE[active_index][0]
+	if points<2:
+		dialogue.text="%s: Maybe after we get to know each other." % name
+		return
+	if rider>=0 or not mobility.walking or car.linear_velocity.length()>1.25:
+		dialogue.text="%s: The passenger seat needs to be free and the car parked." % name
+		return
+	var actor := actors[active_index]
+	if actor.body.position.distance_to(car.position)>7.0:
+		dialogue.text="%s: Let's meet closer to the car." % name
+		return
+	rider=active_index
+	active_index=-1
+	mobility.passenger_occupied=true
+	actor.body.collision_layer=0
+	actor.body.global_position=car.to_global(mobility.PASSENGER)
+	actor.model.play("Sitting_Idle_Loop")
+	for mesh: MeshInstance3D in actor.model.find_children("*","MeshInstance3D",true,false): mesh.layers=4
+	dialogue.text="%s joined you. Shift+G to let them out when stopped." % name
+
+func drop_passenger() -> bool:
+	if rider<0 or car.linear_velocity.length()>1.25: return false
+	var point: Vector3=mobility.exit_position(-1)
+	if point==Vector3.INF: return false
+	var actor := actors[rider]
+	for mesh: MeshInstance3D in actor.model.find_children("*","MeshInstance3D",true,false): mesh.layers=1
+	actor.body.global_position=point
+	actor.body.collision_layer=8
+	actor.model.play("Idle_Loop")
+	rider=-1
+	mobility.passenger_occupied=false
+	return true

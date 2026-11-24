@@ -44,12 +44,15 @@ var camera_initialized := false
 var previous_camera_mode := -1
 var on_foot: Node
 var pedestrians: Node3D
+var venues: Node3D
+var city: Node3D
 
 func _ready() -> void:
 	desktop_mode=OS.has_feature("windows") or OS.has_feature("linux") or OS.has_feature("macos")
 	var world := Node3D.new()
 	world.set_script(preload("res://scripts/world.gd"))
 	add_child(world)
+	city=world
 	car=VehicleBody3D.new()
 	car.set_script(preload("res://scripts/car.gd"))
 	add_child(car)
@@ -238,13 +241,23 @@ func _hud() -> void:
 	on_foot.model_index=appearance.selected
 	appearance.item_selected.connect(func(i: int):
 		on_foot.model_index=i
-		if on_foot.person.model.animations!=null: on_foot.person.model.dress(i))
+		if on_foot.person.model.animations!=null: on_foot.person.model.dress(i,Color.WHITE,on_foot.hairstyle))
+	var hair: OptionButton=settings.choice("Character hairstyle",["Default","Side part","Short cut","Long hair","Buns"],"person_hair",0)
+	on_foot.hairstyle=hair.selected-1
+	hair.item_selected.connect(func(i: int):
+		on_foot.hairstyle=i-1
+		if on_foot.person.model.animations!=null:
+			on_foot.person.model.dress(on_foot.model_index,Color.WHITE,on_foot.hairstyle))
 	on_foot.mode_changed.connect(_mobility_changed)
 	on_foot.interact_requested.connect(_walk_interact)
 	pedestrians=preload("res://scripts/people/pedestrians.gd").new()
 	add_child(pedestrians)
 	pedestrians.setup(layer,car)
+	pedestrians.mobility=on_foot
 	pedestrians.panel.visibility_changed.connect(_settings_visibility)
+	venues=preload("res://scripts/people/venues.gd").new()
+	add_child(venues)
+	venues.setup(layer,on_foot.person,gameplay)
 	_layout_controls()
 	get_viewport().size_changed.connect(_layout_controls)
 	if desktop_mode:
@@ -330,7 +343,7 @@ func _settings_visibility() -> void:
 		interior.cancel()
 
 func _press(id: String, down: bool) -> void:
-	if not car.controls_enabled and id not in ["settings","regions"]: return
+	if not car.controls_enabled and id not in ["settings","regions","quality"]: return
 	held[id]=down
 	car.horn=float(held.get("horn",false))
 	if id in ["gas","brake","clutch"]: _pedal(id,float(down))
@@ -371,7 +384,8 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		if event.keycode==KEY_G and not settings.visible:
-			_walk_interact()
+			if event.shift_pressed: pedestrians.drop_passenger()
+			else: _walk_interact()
 			return
 	if gameplay.panel.visible:
 		if event is InputEventKey and event.pressed and event.keycode==KEY_ESCAPE: gameplay.panel.hide()
@@ -463,6 +477,7 @@ func _process(delta: float) -> void:
 	var lug := clampf((car.transmission.config.idle_rpm-t.rpm)/300,0,1) if t.running else 0.0
 	if not walking: camera.global_position+=car.global_basis.y*sin(t.engine.clock*70)*lug*0.012
 	on_foot.update(delta,not desktop_mode)
+	venues.update(walking)
 	hud.visible=not walking
 	if graphics.sample(delta): _apply_quality()
 	performance_label.visible = settings.monitor_toggle.button_pressed
@@ -608,6 +623,11 @@ func _update_weather() -> void:
 	rain.set_process(rain.visible)
 	rain.drops=18 if graphics.tier<=Graphics.Preset.LOW else 38
 	car.wheel_physics.wet_roads=weather==1
+	var asphalt := G.material("asphalt")
+	asphalt.roughness=0.46 if weather==1 else 0.88
+	asphalt.albedo_color=Color(0.76,0.81,0.87) if weather==1 else Color.WHITE
+	city.streetlight_material.emission_enabled=night<0.32
+	traffic.night=night<0.28
 
 func _mobility_changed(walking: bool) -> void:
 	landscape.player=on_foot.person if walking else car
@@ -618,5 +638,8 @@ func _mobility_changed(walking: bool) -> void:
 	_settings_visibility()
 
 func _walk_interact() -> void:
-	if on_foot.walking and pedestrians.interact(): return
+	if on_foot.walking:
+		if pedestrians.rider>=0 and on_foot.person.position.distance_to(car.position)<3.0 and pedestrians.drop_passenger(): return
+		if venues.interact(): return
+		if pedestrians.interact(): return
 	gameplay.interact()

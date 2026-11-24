@@ -1,6 +1,6 @@
 # Human asset attribution
 
-Quaternius created both humanoid base meshes, skeletons and original textures.
+Quaternius created both humanoid base meshes, skeletons and original textures and four hairstyles.
 The game uses the male and female humanoid bases from the free Universal Base
 Characters kit. Both use movement and seated clips from the free Universal
 Animation Library and Universal Animation Library 2. These packs are CC0 1.0.

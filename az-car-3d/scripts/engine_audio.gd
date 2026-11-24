@@ -88,6 +88,10 @@ static func _stream(kind: String,hz: float,duration: float,looping: bool) -> Aud
 		elif kind=="starter": v=sin(TAU*45*time)*0.1+sin(TAU*130*time)*0.08+filtered*0.12
 		elif kind=="skid": v=filtered*0.04 # No high-frequency tire squeal
 		elif kind=="shift": v=filtered*0.65*exp(-time*28)+sin(TAU*250*time)*0.1*exp(-time*40)
+		elif kind.begins_with("step_"):
+			var soft := kind=="step_soft"
+			var envelope := minf(1.0,time*230.0)*exp(-time*(38.0 if soft else 56.0))
+			v=(filtered*(0.44 if soft else 0.96)+sin(TAU*(58.0 if soft else 116.0)*time)*0.19)*envelope
 		elif kind=="ignition": v=filtered*0.5*exp(-time*45)
 		elif kind=="grind": v=0.0 # Silent rather than screeching
 		elif kind=="stall" or kind=="shutdown": v=sin(TAU*(40*time-30*time*time))*0.25*exp(-time*8)+filtered*0.08

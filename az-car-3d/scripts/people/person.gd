@@ -1,6 +1,7 @@
 extends CharacterBody3D
 
 const HumanModel = preload("res://scripts/people/human_model.gd")
+const Audio = preload("res://scripts/engine_audio.gd")
 const HEIGHT := 1.76
 const CROUCH_HEIGHT := 1.09
 const RADIUS := 0.29
@@ -16,6 +17,9 @@ var locked := false
 var live := false
 var swimming := false
 var landed_time := 0.0
+var footstep: AudioStreamPlayer3D
+var step_elapsed := 0.0
+var step_serial := 0
 
 func _ready() -> void:
 	collision_layer=8
@@ -31,6 +35,11 @@ func _ready() -> void:
 	add_child(collider)
 	model=HumanModel.new()
 	add_child(model)
+	footstep=AudioStreamPlayer3D.new()
+	footstep.volume_db=-23.0
+	footstep.unit_size=2.0
+	footstep.max_distance=15.0
+	add_child(footstep)
 	set_live(false)
 
 func set_live(value: bool) -> void:
@@ -74,6 +83,7 @@ func _physics_process(delta: float) -> void:
 	if not swimming and floor_before and planar.length_squared()>0.1:
 		_try_step(Vector3(velocity.x,0,velocity.z)*delta)
 	move_and_slide()
+	_step_sound(delta)
 	if is_on_floor() and not floor_before and before_fall < -4.2:
 		landed_time=0.30
 		model.play("Jump_Land",0.08)
@@ -106,3 +116,19 @@ func _animate(low: bool, speed: float) -> void:
 	elif not moving: model.play("Idle_Loop")
 	elif sprint: model.play("Sprint_Loop")
 	else: model.play("Jog_Fwd_Loop" if speed>3 else "Walk_Loop")
+
+func _step_sound(delta: float) -> void:
+	var speed := Vector2(get_real_velocity().x,get_real_velocity().z).length()
+	if not is_on_floor() or swimming or speed<0.5:
+		step_elapsed=0.0
+		return
+	step_elapsed+=delta
+	if step_elapsed<clampf(0.64-speed*0.055,0.29,0.57): return
+	step_elapsed=0.0
+	var ray := PhysicsRayQueryParameters3D.create(position+Vector3.UP*0.14,position-Vector3.UP*0.33,1)
+	var hit := get_world_3d().direct_space_state.intersect_ray(ray)
+	var surface: String=hit.collider.get_meta("surface","paving") if not hit.is_empty() else "paving"
+	footstep.stream=Audio._stream("step_soft" if surface in ["sand","grass"] else "step_hard",0.0,0.115,false)
+	step_serial+=1
+	footstep.pitch_scale=0.94+float(step_serial%5)*0.03
+	footstep.play()

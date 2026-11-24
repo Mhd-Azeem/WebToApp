@@ -21,6 +21,7 @@ var walking := false
 var busy := false
 var enabled := true
 var model_index := 0
+var hairstyle := -1
 var sprint := false
 var crouch := false
 var swipe_finger := -1
@@ -29,6 +30,7 @@ var pitch := 0.20
 var zoom := 4.0
 var smooth_target := Vector3.ZERO
 var seat := DRIVER
+var passenger_occupied := false
 var previous_handbrake := 0.0
 var door: Node3D
 
@@ -87,6 +89,9 @@ func toggle(passenger: bool) -> void:
 		notice="Stop the vehicle first"
 		return
 	if walking:
+		if passenger and passenger_occupied:
+			notice="The passenger seat is occupied"
+			return
 		if person.global_position.distance_to(car.global_position)>3.1:
 			notice="Move closer to the vehicle"
 			return
@@ -129,7 +134,7 @@ func _transition(leaving: bool, door_point: Vector3) -> void:
 		previous_handbrake=car.handbrake
 		car.handbrake=1.0
 	car.release_controls()
-	if person.model.animations==null: person.model.dress(model_index)
+	if person.model.animations==null: person.model.dress(model_index,Color.WHITE,hairstyle)
 	person.set_live(false)
 	person.show()
 	person.model.rotation.y=car.global_rotation.y
@@ -144,7 +149,7 @@ func _transition(leaving: bool, door_point: Vector3) -> void:
 	var motion := create_tween()
 	var side := signf(seat.x)
 	door=_make_door(side)
-	motion.tween_property(door,"rotation:y",side*0.92,0.18)
+	motion.tween_property(door,"rotation:y",-side*0.92,0.18)
 	motion.parallel().tween_property(person,"global_position",destination,0.58).set_trans(Tween.TRANS_SINE)
 	motion.tween_property(door,"rotation:y",0.0,0.20)
 	await motion.finished
@@ -217,7 +222,7 @@ func _rotate(relative: Vector2) -> void:
 func update(delta: float, mobile: bool) -> void:
 	var near_car := walking and person.global_position.distance_to(car.global_position)<=3.1
 	buttons[0].visible=mobile and enabled and not busy and (not walking or near_car)
-	buttons[1].visible=mobile and enabled and not busy and near_car
+	buttons[1].visible=mobile and enabled and not busy and near_car and not passenger_occupied
 	for i in range(2,buttons.size()): buttons[i].visible=mobile and enabled and walking and not busy
 	joystick.visible=mobile and enabled and walking and not busy
 	joystick.enabled=joystick.visible
@@ -230,7 +235,7 @@ func update(delta: float, mobile: bool) -> void:
 		return
 	var keyboard := Vector2(float(Input.is_physical_key_pressed(KEY_D))-float(Input.is_physical_key_pressed(KEY_A)),
 		float(Input.is_physical_key_pressed(KEY_S))-float(Input.is_physical_key_pressed(KEY_W)))
-	person.walk_input=(joystick.stick+keyboard).limit_length() if enabled and not busy else Vector2.ZERO
+	person.walk_input=(joystick.stick+keyboard*(0.62 if Input.is_physical_key_pressed(KEY_ALT) else 1.0)).limit_length() if enabled and not busy else Vector2.ZERO
 	person.camera_yaw=yaw
 	person.sprint=sprint or Input.is_physical_key_pressed(KEY_SHIFT)
 	person.crouch=crouch

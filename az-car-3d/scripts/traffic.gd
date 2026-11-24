@@ -10,6 +10,7 @@ const LOOP_Z := [-960.0,-640.0,-320.0,-160.0,0.0,160.0,320.0,640.0,960.0]
 
 var player: Node3D
 var enabled := false
+var night := false
 var density := 8
 var vehicles: Array[CharacterBody3D] = []
 var routes: Array[PackedVector3Array] = []
@@ -132,6 +133,10 @@ func _physics_process(delta: float) -> void:
 	var nearest_distance := 45.0
 	for i in range(density):
 		var body := vehicles[i]
+		if night and i>=maxi(2,density-3):
+			body.hide()
+			body.collision_layer=0
+			continue
 		var distance := body.position.distance_to(player.position) if is_instance_valid(player) else 0.0
 		if distance > 300 or not body.visible:
 			if refresh:

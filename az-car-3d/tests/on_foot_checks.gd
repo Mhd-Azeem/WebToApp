@@ -25,7 +25,8 @@ func run() -> void:
 	check(scene.landscape.player==mobility.person and scene.rear_view.suspended,"Terrain follows the pedestrian and reverse camera suspends")
 	var person = mobility.person
 	check(person.model.animations.has_animation("Sprint") and person.model.animations.has_animation("Sitting_Exit"),"Textured rig imports locomotion and seat clips")
-	person.model.dress(1)
+	person.model.dress(1,Color.WHITE,3)
+	check(is_instance_valid(person.model.hair_attachment) and person.model.hair_attachment.find_children("*","MeshInstance3D",true,false).size()==1, "Selected hairstyle attaches one textured mesh to the head bone")
 	check(person.model.animations.has_animation("Walk"),"Alternate adult rig imports walking animation")
 	var origin: Vector3=person.global_position
 	var start := InputEventKey.new()
