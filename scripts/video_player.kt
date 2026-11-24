@@ -4,7 +4,6 @@ import android.app.PictureInPictureParams
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.Color
-import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -12,115 +11,122 @@ import android.util.Rational
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
-import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.MediaController
 import android.widget.TextView
 import android.widget.Toast
-import android.widget.VideoView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 
 /**
- * Native playback for completed local videos only.
- * Uses Android's available codecs (does not bypass DRM or support every format).
- * MediaController provides scrubbing, seeking and basic play/pause.
+ * Media3 local video player for completed downloads.
+ * The PlayerView controller supplies seek, pause/play and position display.
+ * No DRM bypass or guaranteed codec support is implied.
  */
 class VideoPlayerActivity : AppCompatActivity() {
- private lateinit var video: VideoView
+ private lateinit var player: ExoPlayer
+ private lateinit var videoView: PlayerView
  private lateinit var controls: LinearLayout
- private lateinit var mediaControls: MediaController
- private var player: MediaPlayer? = null
- private val speeds = floatArrayOf(0.75f, 1f, 1.25f, 1.5f, 2f)
- private var speedIndex = 1
  private var pip = false
- private fun Int.dp() = (this * resources.displayMetrics.density).toInt()
- private fun button(text: String, click: () -> Unit): TextView = TextView(this).apply {
-  this.text = text
+ private var captions = true
+ private var fill = false
+ private val speeds = floatArrayOf(0.75f,1.0f,1.25f,1.5f,2.0f)
+ private var speedIndex = 1
+ private fun Int.dp()=(this * resources.displayMetrics.density).toInt()
+ private fun action(label:String,click:()->Unit)=TextView(this).apply{
+  text=label;textSize=13f;gravity=Gravity.CENTER
   setTextColor(0xff00E5EE.toInt())
-  textSize = 14f
-  gravity = Gravity.CENTER
-  setPadding(12.dp(), 10.dp(), 12.dp(), 10.dp())
-  setOnClickListener { click() }
+  setPadding(11.dp(),10.dp(),11.dp(),10.dp())
+  setOnClickListener{click()}
  }
- override fun onCreate(savedInstanceState: Bundle?) {
+ override fun onCreate(savedInstanceState:Bundle?){
   super.onCreate(savedInstanceState)
+  val uri:Uri=intent.data?:run{finish();return}
   window.setBackgroundDrawableResource(android.R.color.black)
   window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-  val source: Uri = intent.data ?: run { finish(); return }
-  val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
-  video = VideoView(this).apply {
-   setOnErrorListener { _, what, extra ->
-    Toast.makeText(this@VideoPlayerActivity, "This file cannot be played by the Android video decoder (" + what + ")", Toast.LENGTH_LONG).show()
-    false
+  player=ExoPlayer.Builder(this).build()
+  player.addListener(object:Player.Listener{
+   override fun onPlayerError(error:PlaybackException){
+    Toast.makeText(this@VideoPlayerActivity,
+     "Unable to play this file: "+(error.message?:"unsupported media"),Toast.LENGTH_LONG).show()
    }
-   setOnPreparedListener { mp ->
-    player = mp
-    mp.isLooping = false
-    setSpeed(1f)
-    start()
-    showController()
-   }
-  }
-  root.addView(video, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
-  mediaControls = MediaController(this).apply { setAnchorView(video) }
-  video.setMediaController(mediaControls)
-  controls = LinearLayout(this).apply {
-   orientation = LinearLayout.HORIZONTAL
-   gravity = Gravity.CENTER_VERTICAL
-   setBackgroundColor(0xee0b1417.toInt())
-   setPadding(8.dp(), 6.dp(), 8.dp(), 6.dp())
-  }
-  controls.addView(button("‹ Back") { finish() }, LinearLayout.LayoutParams(0, -2, 1f))
-  controls.addView(button("▶ / Ⅱ") { if(video.isPlaying) video.pause() else video.start(); showController() })
-  controls.addView(button("1.0×") {
-   speedIndex = (speedIndex + 1) % speeds.size
-   setSpeed(speeds[speedIndex])
-   (controls.getChildAt(2) as TextView).text = speeds[speedIndex].toString() + "×"
   })
-  controls.addView(button("Rotate") {
-   requestedOrientation = if(resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
+  val root=FrameLayout(this).apply{setBackgroundColor(Color.BLACK)}
+  videoView=PlayerView(this).apply{
+   player=this@VideoPlayerActivity.player
+   useController=true
+   controllerShowTimeoutMs=5000
+   setBackgroundColor(Color.BLACK)
+   resizeMode=AspectRatioFrameLayout.RESIZE_MODE_FIT
+  }
+  root.addView(videoView,FrameLayout.LayoutParams(-1,-1,Gravity.CENTER))
+  controls=LinearLayout(this).apply{
+   orientation=LinearLayout.HORIZONTAL
+   gravity=Gravity.CENTER_VERTICAL
+   setPadding(6.dp(),4.dp(),6.dp(),4.dp())
+   setBackgroundColor(0xee091316.toInt())
+  }
+  controls.addView(action("‹ Back"){finish()},LinearLayout.LayoutParams(0,-2,1f))
+  controls.addView(action("1.0×"){
+   speedIndex=(speedIndex+1)%speeds.size
+   player.setPlaybackSpeed(speeds[speedIndex])
+   (controls.getChildAt(1) as TextView).text=speeds[speedIndex].toString()+"×"
+   videoView.showController()
+  })
+  controls.addView(action("CC"){
+   captions=!captions
+   player.trackSelectionParameters=player.trackSelectionParameters.buildUpon()
+    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT,!captions).build()
+   (controls.getChildAt(2) as TextView).alpha=if(captions)1f else 0.4f
+  })
+  controls.addView(action("Fit"){
+   fill=!fill
+   videoView.resizeMode=if(fill)AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+    else AspectRatioFrameLayout.RESIZE_MODE_FIT
+   (controls.getChildAt(3) as TextView).text=if(fill)"Fill" else "Fit"
+  })
+  controls.addView(action("Rotate"){
+   requestedOrientation=if(resources.configuration.orientation==Configuration.ORIENTATION_LANDSCAPE)
     ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
   })
-  if(Build.VERSION.SDK_INT >= 26) {
-   controls.addView(button("PiP") { enterPip() })
+  if(Build.VERSION.SDK_INT>=26){
+   controls.addView(action("PiP"){enterPip()})
   }
-  root.addView(controls, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+  root.addView(controls,FrameLayout.LayoutParams(-1,-2,Gravity.TOP))
   setContentView(root)
-  video.setVideoURI(source)
-  video.requestFocus()
+  player.setMediaItem(MediaItem.fromUri(uri))
+  player.prepare()
+  player.playWhenReady=true
  }
- private fun showController() {
-  mediaControls.show(4000)
- }
- private fun setSpeed(speed: Float) {
-  if(Build.VERSION.SDK_INT >= 23) {
-   try { player?.let { mp -> mp.playbackParams = mp.playbackParams.setSpeed(speed) } }
-   catch(_: Exception) { Toast.makeText(this, "Playback speed not supported", Toast.LENGTH_SHORT).show() }
-  }
- }
- private fun enterPip() {
-  if(Build.VERSION.SDK_INT >= 26 && video.isPlaying) {
-   try {
+ private fun enterPip(){
+  if(Build.VERSION.SDK_INT>=26 && player.isPlaying){
+   try{
     enterPictureInPictureMode(PictureInPictureParams.Builder()
-     .setAspectRatio(Rational(16, 9)).build())
-   } catch(_: Exception) {
-    Toast.makeText(this, "Picture-in-picture is unavailable", Toast.LENGTH_SHORT).show()
+     .setAspectRatio(Rational(16,9)).build())
+   }catch(_:Exception){
+    Toast.makeText(this,"Picture-in-picture unavailable",Toast.LENGTH_SHORT).show()
    }
   }
  }
- override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
-  super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
-  pip = isInPictureInPictureMode
-  controls.visibility = if(pip) View.GONE else View.VISIBLE
+ override fun onPictureInPictureModeChanged(isInPictureInPictureMode:Boolean,newConfig:Configuration){
+  super.onPictureInPictureModeChanged(isInPictureInPictureMode,newConfig)
+  pip=isInPictureInPictureMode
+  controls.visibility=if(pip)View.GONE else View.VISIBLE
+  videoView.useController=!pip
  }
- override fun onPause() {
+ override fun onPause(){
   super.onPause()
-  if(!pip && !isChangingConfigurations) video.pause()
+  if(!pip && ::player.isInitialized && !isChangingConfigurations)player.pause()
  }
- override fun onDestroy() {
-  player = null
-  video.stopPlayback()
+ override fun onDestroy(){
+  if(::videoView.isInitialized)videoView.player=null
+  if(::player.isInitialized)player.release()
   super.onDestroy()
  }
 }
