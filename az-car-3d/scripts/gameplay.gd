@@ -7,6 +7,7 @@ const Minimap = preload("res://scripts/ui/minimap.gd")
 var progress := Progress.new()
 var navigation := Navigation.new()
 var car: VehicleBody3D
+var walker: Node3D
 var panel: PanelContainer
 var map: Control
 var status: Label
@@ -151,10 +152,11 @@ func _process(delta: float) -> void:
 		save()
 
 func _update_map() -> void:
+	var focus: Node3D=walker if is_instance_valid(walker) else car
 	nearby=-1
 	for i in range(Region.DESTINATIONS.size()):
 		var point: Vector3 = Region.DESTINATIONS[i][1]
-		if car.position.distance_to(point)<14.0:
+		if focus.position.distance_to(point)<14.0:
 			nearby=i
 			break
 	if progress.distance_m>=1000.0: progress.award("First kilometre")
@@ -162,9 +164,9 @@ func _update_map() -> void:
 		progress.credits,car.fuel_litres,roundi(car.damage*100),
 		progress.completed.size(),Progress.MISSIONS.size(),progress.achievements.size()]
 	if nearby>=0: summary.text+="\n"+Region.DESTINATIONS[nearby][0]
-	map.position_3d=car.position
-	map.forward=car.global_basis.z
+	map.position_3d=focus.position
+	map.forward=focus.global_basis.z
 	var target := progress.target()
 	map.highlighted=target if target>=0 else selection
-	map.route=navigation.route(car.position,Region.DESTINATIONS[map.highlighted][1]) if map.highlighted>=0 else PackedVector3Array()
+	map.route=navigation.route(focus.position,Region.DESTINATIONS[map.highlighted][1]) if map.highlighted>=0 else PackedVector3Array()
 	map.queue_redraw()

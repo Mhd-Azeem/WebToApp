@@ -7,6 +7,7 @@ var label: Label
 var elapsed := 0.0
 var refresh_rate := 15.0
 var active := false
+var suspended := false
 func setup(parent: Node, car: VehicleBody3D) -> void:
 	vehicle=car
 	viewport=SubViewport.new()
@@ -42,7 +43,7 @@ func setup(parent: Node, car: VehicleBody3D) -> void:
 func _process(delta: float) -> void:
 	if not is_instance_valid(vehicle): return
 	var t = vehicle.transmission
-	active=(t.mode==0 and t.gear==-1) or (t.mode==1 and t.selector=="R")
+	active=not suspended and ((t.mode==0 and t.gear==-1) or (t.mode==1 and t.selector=="R"))
 	display.visible=active
 	if not active:
 		viewport.render_target_update_mode=SubViewport.UPDATE_DISABLED

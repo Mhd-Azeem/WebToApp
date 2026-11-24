@@ -74,6 +74,11 @@ jobs:
           set -euo pipefail
           godot --headless --path az-car-3d --fixed-fps 60 --script res://tests/v07_checks.gd 2>&1 | tee az-car-3d/build/v07-tests.log
           if grep -E 'SCRIPT ERROR|ERROR:' az-car-3d/build/v07-tests.log; then exit 1; fi
+      - name: Validate walking and vehicle transitions
+        run: |
+          set -euo pipefail
+          godot --headless --path az-car-3d --fixed-fps 60 --script res://tests/on_foot_checks.gd 2>&1 | tee az-car-3d/build/on-foot-tests.log
+          if grep -E 'SCRIPT ERROR|ERROR:' az-car-3d/build/on-foot-tests.log; then exit 1; fi
       - name: Export debug Android APK
         run: |
           set -euo pipefail
@@ -81,7 +86,6 @@ jobs:
           if grep -E 'SCRIPT ERROR|ERROR:' az-car-3d/build/export.log; then exit 1; fi
           test -s az-car-3d/build/AZ-Car-3D-Colombo.apk
           "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose --print-certs az-car-3d/build/AZ-Car-3D-Colombo.apk | tee az-car-3d/build/apk-signature.txt
-          grep -Fq "certificate SHA-256 digest: e6d48d8f35e900429b93f667a15f4d270105d097207af8bea80204ab55d7c5f8" az-car-3d/build/apk-signature.txt
           "$ANDROID_HOME/build-tools/35.0.1/aapt" dump badging az-car-3d/build/AZ-Car-3D-Colombo.apk | tee az-car-3d/build/apk-badging.txt
           grep -Fq "package: name='com.azeem.azcar3d.colombo' versionCode='7' versionName='0.7.0'" az-car-3d/build/apk-badging.txt
           grep -Fq "native-code: 'arm64-v8a'" az-car-3d/build/apk-badging.txt
@@ -92,6 +96,9 @@ jobs:
           name: AZ-Car-3D-Android-${{ github.sha }}
           path: az-car-3d/build/
           if-no-files-found: error
+      - name: Check upgrade-compatible Android signing certificate
+        run: |
+          grep -Fq "certificate SHA-256 digest: e6d48d8f35e900429b93f667a15f4d270105d097207af8bea80204ab55d7c5f8" az-car-3d/build/apk-signature.txt
       - name: Require Windows validation of the same source
         if: success() && github.ref == 'refs/heads/feature/az-car-3d'
         env:

@@ -42,6 +42,7 @@ var orbit_angle := 0.0
 var orbit_finger := -1
 var camera_initialized := false
 var previous_camera_mode := -1
+var on_foot: Node
 
 func _ready() -> void:
 	desktop_mode=OS.has_feature("windows") or OS.has_feature("linux") or OS.has_feature("macos")
@@ -229,6 +230,16 @@ func _hud() -> void:
 	add_child(gameplay)
 	gameplay.setup(layer,car)
 	gameplay.panel.visibility_changed.connect(_settings_visibility)
+	on_foot=preload("res://scripts/people/on_foot.gd").new()
+	add_child(on_foot)
+	on_foot.setup(layer,car,camera)
+	var appearance: OptionButton=settings.choice("Playable character",["Man","Woman"],"person_model",0)
+	on_foot.model_index=appearance.selected
+	appearance.item_selected.connect(func(i: int):
+		on_foot.model_index=i
+		if on_foot.person.model.animations!=null: on_foot.person.model.dress(i))
+	on_foot.mode_changed.connect(_mobility_changed)
+	on_foot.interact_requested.connect(_walk_interact)
 	_layout_controls()
 	get_viewport().size_changed.connect(_layout_controls)
 	if desktop_mode:
@@ -297,7 +308,11 @@ func _pedal(id: String,value: float) -> void:
 		"clutch": car.clutch_pedal=value
 
 func _settings_visibility() -> void:
-	car.controls_enabled=not settings.visible and not gameplay.panel.visible
+	var available: bool = not settings.visible and not gameplay.panel.visible
+	if is_instance_valid(on_foot):
+		on_foot.enabled=available
+		if not available: on_foot.clear_input()
+	car.controls_enabled=available and (not is_instance_valid(on_foot) or on_foot.driving())
 	for pedal in pedals.values():
 		pedal.enabled=car.controls_enabled
 		if not car.controls_enabled: pedal.cancel()
@@ -347,12 +362,18 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		if event.keycode==KEY_G and not settings.visible:
-			gameplay.interact()
+			_walk_interact()
 			return
 	if gameplay.panel.visible:
 		if event is InputEventKey and event.pressed and event.keycode==KEY_ESCAPE: gameplay.panel.hide()
 		return
 	if settings.visible and not (event is InputEventKey and event.pressed and event.keycode==KEY_ESCAPE): return
+	if is_instance_valid(on_foot) and on_foot.input_event(event):
+		get_viewport().set_input_as_handled()
+		return
+	if is_instance_valid(on_foot) and not on_foot.driving():
+		if event is InputEventKey and event.pressed and event.keycode==KEY_ESCAPE: settings.show()
+		return
 	if camera_mode==3:
 		if event is InputEventScreenTouch:
 			if not event.pressed and orbit_finger==event.index: orbit_finger=-1
@@ -386,7 +407,7 @@ func _input(event: InputEvent) -> void:
 		elif event.keycode>=KEY_1 and event.keycode<=KEY_5: t.shift(event.keycode-KEY_0,car.signed_speed)
 
 func _process(delta: float) -> void:
-	steering_wheel.visible=not desktop_mode and steering_selector.selected==1
+	steering_wheel.visible=not desktop_mode and steering_selector.selected==1 and on_foot.driving()
 	steering_wheel.enabled=car.controls_enabled
 	shifter.set_process_input(car.controls_enabled)
 	if steering_selector.selected==2 and car.controls_enabled:
@@ -399,10 +420,13 @@ func _process(delta: float) -> void:
 		if weather_elapsed>0.25: _update_weather()
 	var camera_changed := camera_mode!=previous_camera_mode
 	previous_camera_mode=camera_mode
-	cockpit=camera_mode==1
-	gauges.visible=camera_mode==2
+	var walking: bool=on_foot.walking
+	cockpit=camera_mode==1 and not walking
+	gauges.visible=camera_mode==2 and not walking
 	interior.visible=cockpit
-	if cockpit:
+	if walking:
+		camera_initialized=false
+	elif cockpit:
 		camera.global_position=car.to_global(Vector3(0.42,1.58,0.5))
 		camera.look_at(camera.global_position+car.global_basis.z*10,car.global_basis.y)
 		car.visual.visible=true
@@ -428,7 +452,9 @@ func _process(delta: float) -> void:
 		camera.look_at(target)
 	var t = car.transmission
 	var lug := clampf((car.transmission.config.idle_rpm-t.rpm)/300,0,1) if t.running else 0.0
-	camera.global_position+=car.global_basis.y*sin(t.engine.clock*70)*lug*0.012
+	if not walking: camera.global_position+=car.global_basis.y*sin(t.engine.clock*70)*lug*0.012
+	on_foot.update(delta,not desktop_mode)
+	hud.visible=not walking
 	if graphics.sample(delta): _apply_quality()
 	performance_label.visible = settings.monitor_toggle.button_pressed
 	performance_elapsed += delta
@@ -442,16 +468,19 @@ func _process(delta: float) -> void:
 		t.display(),roundi(car.linear_velocity.length()*3.6),roundi(t.rpm),t.engine.status(),
 		roundi(t.clutch*100),roundi(absf(t.engine.load)*100),
 		"HANDBRAKE" if car.handbrake>0 else Graphics.NAMES[graphics.tier],t.message]
-	shifter.visible=t.mode==0 and not desktop_mode
+	shifter.visible=t.mode==0 and not desktop_mode and on_foot.driving()
 	if is_instance_valid(cockpit_overlay): cockpit_overlay.visible=cockpit and not settings.visible
 	if t.mode!=0 and pedals.clutch.visible: pedals.clutch.cancel()
-	pedals.clutch.visible=t.mode==0 and not desktop_mode
+	pedals.clutch.visible=t.mode==0 and not desktop_mode and on_foot.driving()
+	for pedal_name in ["gas","brake"]: pedals[pedal_name].visible=on_foot.driving() and not desktop_mode
 	settings.transmission_selector.select(t.mode)
 	for button in touch_buttons:
 		var id: String=button.get_meta("id")
 		if desktop_mode:
 			button.visible=false
 			continue
+		button.visible=on_foot.driving() or id in ["settings","regions","quality"]
+		if not on_foot.driving(): continue
 		if id in ["left","right"]: button.visible=steering_selector.selected==0
 		if id.begins_with("gear") or id=="clutch": button.visible=t.mode==0
 		if id.begins_with("auto"): button.visible=t.mode==1
@@ -487,6 +516,7 @@ func _notification(what: int) -> void:
 		car.release_controls()
 		if is_instance_valid(steering_wheel): steering_wheel.cancel()
 		orbit_finger=-1
+		if is_instance_valid(on_foot): on_foot.clear_input()
 		if is_instance_valid(gameplay): gameplay.save()
 		for pedal in pedals.values(): pedal.cancel()
 		get_tree().paused=true
@@ -512,7 +542,7 @@ func _desktop_controls(layer: CanvasLayer) -> void:
 	settings_button.pressed.connect(func(): settings.visible=not settings.visible)
 	desktop_help=Label.new()
 	desktop_help.position=Vector2(18,682)
-	desktop_help.text="W/S pedals · A/D steering · C/Shift clutch · V camera · Tab map & garage · G interact · L lights"
+	desktop_help.text="W/S pedals · A/D steering · C/Shift clutch · T walk/enter · V camera · Tab map & garage · G interact · L lights"
 	desktop_help.add_theme_font_size_override("font_size",13)
 	desktop_help.add_theme_color_override("font_color",Color(0.94,0.97,1))
 	layer.add_child(desktop_help)
@@ -531,6 +561,9 @@ func _layout_controls() -> void:
 	controls.append_array(touch_buttons)
 	controls.append_array(pedals.values())
 	controls.append_array([shifter,steering_wheel])
+	if is_instance_valid(on_foot):
+		controls.append_array(on_foot.buttons)
+		controls.append(on_foot.joystick)
 	for control: Node2D in controls:
 		var base: Vector2 = control.get_meta("base_position")
 		var x := margins.x if base.x<640 else -margins.x
@@ -562,3 +595,13 @@ func _update_weather() -> void:
 	rain.set_process(rain.visible)
 	rain.drops=18 if graphics.tier<=Graphics.Preset.LOW else 38
 	car.wheel_physics.wet_roads=weather==1
+
+func _mobility_changed(walking: bool) -> void:
+	landscape.player=on_foot.person if walking else car
+	traffic.player=landscape.player
+	gameplay.walker=on_foot.person if walking else null
+	rear_view.suspended=walking
+	_settings_visibility()
+
+func _walk_interact() -> void:
+	gameplay.interact()

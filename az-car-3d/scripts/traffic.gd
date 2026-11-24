@@ -8,7 +8,7 @@ const KINDS := ["sedan","hatchback","suv","van","bus","truck","motorcycle","tuk-
 const MAIN_X := [-96.0, 0.0, 96.0]
 const LOOP_Z := [-960.0,-640.0,-320.0,-160.0,0.0,160.0,320.0,640.0,960.0]
 
-var player: VehicleBody3D
+var player: Node3D
 var enabled := false
 var density := 8
 var vehicles: Array[CharacterBody3D] = []

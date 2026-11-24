@@ -90,3 +90,14 @@ Open the map button or press Tab for GPS, garage and missions. Stop at a marked 
 The eastern road links the north and south Paddy Lane junctions via a graded highland road, a covered passage and a bridge. Terrain and rural foliage load in 80 m tiles. Core city and road collisions stay resident. Settings include four graphics tiers, an adaptive mode with 30/60 FPS targets, traffic density tied to graphics, optional performance counters, weather, day/night, driving aids, audio mix and touch steering. V cycles cockpit, hood, orbit and chase. C or Shift operates the clutch. Drag the center of the screen or use the right mouse button to orbit. Reset locates the nearest road and checks lane surface and vehicle clearance. The last grounded asphalt checkpoint provides a fallback.
 
 Android uses package com.azeem.azcar3d.colombo and version code 7. The dedicated Android workflow publishes a versioned preview after its Android and Windows checks. Device-specific frame pacing, battery use, heat, cutouts, tilt orientation and speaker balance require physical testing.
+
+### Walking and vehicle seats
+
+The game starts in the driver's seat as before. Stop and press **T** or tap
+**Walk / enter** to get out through the checked exit side. Walk with **WASD**
+or the joystick. Use **Shift** to sprint, **Space** to jump and **C** to
+crouch. Drag the right mouse button or swipe the free camera area to orbit.
+Scroll to zoom on desktop. Approach the driver door and press **T** to resume
+driving, or approach the opposite door and use **Shift+T** to sit as a
+passenger. Settings lets you select either adult character. See
+[asset attribution](assets/humans/ATTRIBUTION.md) for model and animation sources.
