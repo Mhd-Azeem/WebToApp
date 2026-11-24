@@ -290,6 +290,7 @@ class DownloadService : Service() {
      val total=prior.optLong("size",-1L).let{if(it>=0)it else downloaded}
      saveStatus(id,"Completed",total,downloaded,0,uri.toString())
      targets.edit().remove(id.toString()).apply()
+     validators.edit().remove(id.toString()).apply()
      File(cacheDir, "transfer_" + id + ".part").delete()
      if(getSharedPreferences("web_settings",MODE_PRIVATE).getBoolean("download_notifications",true)) {
       try {
@@ -547,6 +548,45 @@ class DownloadService : Service() {
   if(!original.renameTo(dest))throw IOException("Could not rename completed download")
   return Uri.fromFile(dest)
  }
+
+ private fun expectedDigest(conn:HttpURLConnection):String {
+  val checksum=conn.getHeaderField("X-Checksum-Sha256")?.trim()?.lowercase(java.util.Locale.ROOT).orEmpty()
+  if(checksum.matches(Regex("[0-9a-f]{64}")))return checksum
+  val raw=conn.getHeaderField("Digest")?:""
+  val part=raw.split(",").map{it.trim()}.firstOrNull{it.startsWith("sha-256=",true)}?:""
+  return try{
+   val decoded=Base64.decode(part.substringAfter("=").trim().trim('"'),Base64.DEFAULT)
+   if(decoded.size!=32)"" else decoded.joinToString(""){"%02x".format(it.toInt() and 255)}
+  }catch(_:Exception){""}
+ }
+ private fun ensureFreeStorage(remaining:Long) {
+  if(remaining<=0L)return
+  val free=runCatching{
+   val storage=getExternalFilesDir(null)?:filesDir
+   StatFs(storage.absolutePath).availableBytes
+  }.getOrNull()?:return
+  val safety=64L*1024L*1024L
+  if(free<remaining+safety)
+   throw IOException("Insufficient storage: need about "+((remaining+safety)/(1024L*1024L))+
+    " MB free, available "+(free/(1024L*1024L))+" MB")
+ }
+ private fun verifySha256(uri:Uri,expected:String){
+  if(expected.length!=64)return
+  val digest=MessageDigest.getInstance("SHA-256")
+  val input=if(uri.scheme=="content")contentResolver.openInputStream(uri)
+   else File(uri.path?:throw IOException("Missing file for verification")).inputStream()
+  input?.use{stream->
+   val data=ByteArray(131072)
+   while(true){
+    val n=stream.read(data)
+    if(n<0)break
+    digest.update(data,0,n)
+   }
+  }?:throw IOException("Cannot read downloaded file for verification")
+  val actual=digest.digest().joinToString(""){"%02x".format(it.toInt() and 255)}
+  if(actual!=expected)throw IOException("SHA-256 checksum mismatch: download preserved for inspection")
+ }
+
  private fun transferDirect(task:Task,fields:List<String>):Triple<String,String,Uri> {
   val (url,name,mime,agent,cookie)=fields
   val referer=fields.getOrElse(5){""}
@@ -566,7 +606,11 @@ class DownloadService : Service() {
     saveStatus(task.id,"Saving file",expected,offset)
     return Triple(name,mime,finishDestination(task.id,dest,name,mime))
    }
-   var conn=openConnection(url,agent,cookie,referer,offset)
+   val priorValidator=try{JSONObject(validators.getString(task.id.toString(),"{}")?:"{}")}catch(_:Exception){JSONObject()}
+   val strongTag=priorValidator.optString("etag","").takeUnless{it.startsWith("W/")} ?: ""
+   val lastChanged=priorValidator.optString("lastModified","")
+   val ifRange=if(offset>0L)strongTag.ifBlank{lastChanged} else ""
+   var conn=openConnection(url,agent,cookie,referer,offset,ifRange)
    task.connection=conn
    try{
     var code=conn.responseCode
@@ -586,9 +630,31 @@ class DownloadService : Service() {
       else "Cannot resume: server does not recognize saved bytes; saved progress kept.")
     }
     if(code!=200 && code!=206)throw IOException("HTTP "+code+" downloading file")
+    var advertisedTotal=-1L
     if(code==206){
      val range=conn.getHeaderField("Content-Range")?:""
-     if(!range.startsWith("bytes "+offset+"-"))throw IOException("Invalid resume range from server")
+     val bytes=range.removePrefix("bytes ").substringBefore('/')
+     val first=bytes.substringBefore('-').toLongOrNull()
+     val last=bytes.substringAfter('-').toLongOrNull()
+     advertisedTotal=range.substringAfter('/',"").toLongOrNull()?:-1L
+     if(!range.startsWith("bytes ") || first!=offset || last==null || last<offset ||
+        (advertisedTotal>0L && last>=advertisedTotal))
+      throw IOException("Invalid Content-Range: refusing to join different file bytes")
+     val newTag=conn.getHeaderField("ETag")?:""
+     val newModified=conn.getHeaderField("Last-Modified")?:""
+     if(strongTag.isNotBlank() && newTag.isNotBlank() && strongTag!=newTag)
+      throw IOException("Remote file changed (ETag); saved partial download kept")
+     if(lastChanged.isNotBlank() && newModified.isNotBlank() && lastChanged!=newModified)
+      throw IOException("Remote file changed (Last-Modified); saved partial download kept")
+     if(expected>0L && advertisedTotal>0L && advertisedTotal!=expected)
+      throw IOException("Remote file size changed; saved partial download kept")
+    }else if(offset==0L){
+     // Only a full HTTP 200 response can provide a trustworthy full-file hash.
+     validators.edit().putString(task.id.toString(),JSONObject().apply{
+      put("etag",conn.getHeaderField("ETag")?:"")
+      put("lastModified",conn.getHeaderField("Last-Modified")?:"")
+      put("sha256",expectedDigest(conn))
+     }.toString()).apply()
     }
     val type=conn.contentType?.substringBefore(';')?.trim()?.lowercase(java.util.Locale.ROOT).orEmpty()
     val isBinary=name.substringAfterLast('.',"").lowercase(java.util.Locale.ROOT) in
@@ -596,10 +662,17 @@ class DownloadService : Service() {
      mime.startsWith("video/") || mime.startsWith("audio/")
     if(isBinary && type=="text/html")throw IOException("Server returned a webpage instead of file data")
     val length=conn.contentLengthLong
-    val total=if(length>=0L)offset+length else -1L
+    val total=if(advertisedTotal>0L)advertisedTotal
+     else if(length>=0L)offset+length else -1L
+    if(code==206 && advertisedTotal>0L && length>=0L && offset+length>advertisedTotal)
+     throw IOException("Server returned more bytes than the advertised file length")
+    ensureFreeStorage(if(total>0L)total-offset else -1L)
     var done=offset
     var lastBytes=offset
     var lastTime=SystemClock.elapsedRealtime()
+    val sessionStart=lastTime
+    val bandwidth=getSharedPreferences("web_settings",MODE_PRIVATE)
+     .getInt("download_speed_kib",0).coerceIn(0,10240).toLong()*1024L
     saveStatus(task.id,"Downloading",total,done)
     fun consume(write:(ByteArray,Int)->Unit){
      conn.inputStream.use{input->
@@ -609,6 +682,12 @@ class DownloadService : Service() {
        if(n<0)break
        write(buf,n)
        done+=n
+       if(bandwidth>0L){
+        val elapsed=SystemClock.elapsedRealtime()-sessionStart
+        val needed=((done-offset)*1000L)/bandwidth
+        if(needed>elapsed && !task.cancelled)
+         Thread.sleep((needed-elapsed).coerceAtMost(250L))
+       }
        val now=SystemClock.elapsedRealtime()
        if(now-lastTime>=800L){
         val speed=((done-lastBytes)*1000L/(now-lastTime).coerceAtLeast(1L)).coerceAtLeast(0L)
@@ -638,14 +717,25 @@ class DownloadService : Service() {
     }
     if(task.cancelled)throw IOException("Download paused")
     if(total>=0L && done!=total)throw IOException("Incomplete transfer: "+done+"/"+total)
+    if(targetLength(dest)!=done)throw IOException("Storage size mismatch; downloaded bytes preserved")
+    val storedValidator=try{JSONObject(validators.getString(task.id.toString(),"{}")?:"{}")}catch(_:Exception){JSONObject()}
+    val checksum=storedValidator.optString("sha256","")
+    if(checksum.isNotBlank()){
+     saveStatus(task.id,"Verifying",total,done)
+     verifySha256(dest,checksum)
+    }
     saveStatus(task.id,"Saving file",total,done)
     val finalUri=finishDestination(task.id,dest,name,mime)
     return Triple(name,mime,finalUri)
    }catch(e:Exception){
     if(task.cancelled)throw e
     val current=try{JSONObject(statuses.getString(task.id.toString(),"{}")?:"{}")}catch(_:Exception){JSONObject()}
-    if(current.optString("state")=="Saving file")
+    if(current.optString("state")=="Saving file" || current.optString("state")=="Verifying")
      throw IOException("Finalizing file failed: "+(e.message?:"storage error"),e)
+    if(e.message?.startsWith("Insufficient storage")==true ||
+       e.message?.contains("file changed",true)==true ||
+       e.message?.contains("size changed",true)==true ||
+       e.message?.startsWith("Invalid Content-Range")==true)throw e
     if(attempt>=5 || e.message?.startsWith("Server returned a webpage")==true ||
        e.message?.contains("refusing to overwrite")==true ||
        e.message?.startsWith("Cannot create a writable download file")==true)throw e
@@ -661,7 +751,8 @@ class DownloadService : Service() {
  }
  private fun totalSafe(value:Long):Long=value.coerceAtLeast(0L)
 
- private fun openConnection(url:String,agent:String,cookie:String,referer:String,offset:Long):HttpURLConnection {
+ private fun openConnection(url:String,agent:String,cookie:String,referer:String,offset:Long,
+  ifRange:String=""):HttpURLConnection {
   return (URL(url).openConnection() as HttpURLConnection).apply {
    connectTimeout=20000;readTimeout=20000;instanceFollowRedirects=true
    if(agent.isNotBlank())setRequestProperty("User-Agent",agent)
@@ -670,7 +761,10 @@ class DownloadService : Service() {
     setRequestProperty("Referer",referer)
    setRequestProperty("Accept","*/*")
    setRequestProperty("Accept-Encoding","identity")
-   if(offset>0)setRequestProperty("Range","bytes=" + offset + "-")
+   if(offset>0){
+    setRequestProperty("Range","bytes=" + offset + "-")
+    if(ifRange.isNotBlank())setRequestProperty("If-Range",ifRange)
+   }
   }
  }
 
