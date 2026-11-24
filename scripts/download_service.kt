@@ -20,6 +20,7 @@ import android.provider.MediaStore
 import androidx.core.app.NotificationCompat
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.io.RandomAccessFile
 import java.net.HttpURLConnection
@@ -49,6 +50,7 @@ class DownloadService : Service() {
  private val running = ConcurrentHashMap<Long, Task>()
  private val metadata by lazy { getSharedPreferences("resumable_transfers", MODE_PRIVATE) }
  private val statuses by lazy { getSharedPreferences("transfer_status", MODE_PRIVATE) }
+ private val targets by lazy { getSharedPreferences("transfer_targets", MODE_PRIVATE) }
  private val manager by lazy { getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager }
  @Volatile private var foreground = false
  @Volatile private var lastNotification = 0L
@@ -83,9 +85,19 @@ class DownloadService : Service() {
    }
    action == ACTION_REMOVE && id > 0 -> {
     running[id]?.let { it.removed = true; it.cancelled = true; it.connection?.disconnect() }
+    val previous=try { JSONObject(statuses.getString(id.toString(),"{}")?:"{}") } catch(_:Exception){ JSONObject() }
+    val pending=targets.getString(id.toString(),null)
     metadata.edit().remove(id.toString()).apply()
     statuses.edit().remove(id.toString()).apply()
-    File(cacheDir, "transfer_" + id + ".part").delete()
+    targets.edit().remove(id.toString()).apply()
+    if(previous.optString("state")!="Completed" && pending!=null) {
+     try {
+      val dest=Uri.parse(pending)
+      if(dest.scheme=="content")contentResolver.delete(dest,null,null)
+      else if(dest.scheme=="file")File(dest.path?:"").delete()
+     } catch(_:Exception){}
+    }
+    if(!running.containsKey(id))File(cacheDir, "transfer_" + id + ".part").delete()
     stopIfIdle()
    }
    intent == null -> { // START_STICKY restart after process termination
@@ -179,8 +191,9 @@ class DownloadService : Service() {
 
  private fun saveStatusPreservingProgress(id:Long,state:String){
   val previous=try{JSONObject(statuses.getString(id.toString(),"{}")?:"{}")}catch(_:Exception){JSONObject()}
+  val downloaded=stagedLength(id).coerceAtLeast(0L)
   saveStatus(id,state,previous.optLong("size",-1L),
-   File(cacheDir,"transfer_" + id + ".part").length(),0,previous.optString("uri",""))
+   downloaded,0,previous.optString("uri",""))
  }
 
  private fun isWifiAllowed(): Boolean {
@@ -209,16 +222,19 @@ class DownloadService : Service() {
   }
   val task = Task(id)
   if(running.putIfAbsent(id, task) != null) return
-  saveStatus(id, "Connecting", done = File(cacheDir,"transfer_" + id + ".part").length())
+  val last=try{ JSONObject(statuses.getString(id.toString(),"{}")?:"{}") }catch(_:Exception){ JSONObject() }
+  saveStatus(id,"Connecting",last.optLong("size",-1L),stagedLength(id).coerceAtLeast(0L))
   refreshNotification(true)
   Thread({
    try {
     val (name,mime,uri) = transfer(task, fields)
     if(!task.cancelled) {
-     val file = File(cacheDir, "transfer_" + id + ".part")
-     val total = file.length()
-     saveStatus(id, "Completed",total,total,0,uri.toString())
-     file.delete()
+     val prior=try{ JSONObject(statuses.getString(id.toString(),"{}")?:"{}") }catch(_:Exception){ JSONObject() }
+     val downloaded=prior.optLong("done",0L).coerceAtLeast(0L)
+     val total=prior.optLong("size",-1L).let{if(it>=0)it else downloaded}
+     saveStatus(id,"Completed",total,downloaded,0,uri.toString())
+     targets.edit().remove(id.toString()).apply()
+     File(cacheDir, "transfer_" + id + ".part").delete()
      if(getSharedPreferences("web_settings",MODE_PRIVATE).getBoolean("download_notifications",true)) {
       try {
        manager.notify((id % 100000).toInt()+3000,
@@ -236,8 +252,9 @@ class DownloadService : Service() {
     if(!task.cancelled && !task.removed) {
      val status = statuses.getString(id.toString(),null)
      val old = try { JSONObject(status ?: "{}") } catch(_:Exception) { JSONObject() }
-     saveStatus(id,"Failed: " + (e.message ?: "network error"),
-      old.optLong("size",-1L),File(cacheDir,"transfer_" + id + ".part").length())
+     val prefix=if(old.optString("state")=="Saving file")"Failed to save file: " else "Failed: "
+     saveStatus(id,prefix + (e.message ?: "network or storage error"),
+      old.optLong("size",-1L),stagedLength(id).coerceAtLeast(0L))
     }
    } finally {
     running.remove(id, task)
@@ -248,9 +265,27 @@ class DownloadService : Service() {
 
  /** Resume partial downloads. If a server ignores Range, restart safely at byte 0. */
  private fun transfer(task:Task, fields:List<String>):Triple<String,String,Uri> {
+  // Previous versions downloaded into cache and copied at 100%. Preserve those
+  // files and allow retrying finalization without downloading them again.
+  val legacy=File(cacheDir,"transfer_" + task.id + ".part")
+  return if(legacy.length()>0L && !targets.contains(task.id.toString()))
+   transferLegacy(task,fields)
+  else transferDirect(task,fields)
+ }
+ private fun transferLegacy(task:Task, fields:List<String>):Triple<String,String,Uri> {
   val (url,name,mime,agent,cookie)=fields
   val referer=fields.getOrElse(5){""}
   val file = File(cacheDir,"transfer_" + task.id + ".part")
+  val old=try{JSONObject(statuses.getString(task.id.toString(),"{}")?:"{}")}catch(_:Exception){JSONObject()}
+  val known=old.optLong("size",-1L)
+  if(known>0L && file.length()==known){
+   saveStatus(task.id,"Saving file",known,known)
+   try{
+    return Triple(name,mime,publishFile(file,name,mime))
+   }catch(e:Exception){
+    throw IOException("Saving existing complete download failed (check free storage): "+(e.message?:"unknown error"),e)
+   }
+  }
   var attempt = 0
   while(true) {
    if(task.cancelled) throw IOException("Download cancelled")
@@ -319,10 +354,13 @@ class DownloadService : Service() {
     if(task.cancelled) throw IOException("Download paused")
     if(total>=0 && done!=total) throw IOException("Incomplete download")
     saveStatus(task.id,"Saving file",total,done)
-    val uri=publishFile(file,name,mime)
+    val uri=try{publishFile(file,name,mime)}catch(e:Exception){
+     throw IOException("Saving file failed (check free storage): "+(e.message?:"unknown error"),e)
+    }
     return Triple(name,mime,uri)
    } catch(e:Exception) {
     if(task.cancelled)throw e
+    if(e.message?.startsWith("Saving file failed")==true)throw e
     if(attempt>=5)throw e
     // Do not endlessly retry auth failures and expired links.
     if(e.message?.startsWith("HTTP 401:")==true ||
@@ -346,6 +384,179 @@ class DownloadService : Service() {
    }
   }
  }
+
+
+ // New transfers stream directly to an Android Downloads entry marked pending.
+ // No second full-size copy is needed when finishing multi-GB files.
+ private fun pendingDestination(id:Long,name:String,mime:String):Uri {
+  targets.getString(id.toString(),null)?.let{return Uri.parse(it)}
+  val dest=if(Build.VERSION.SDK_INT>=29){
+   val values=ContentValues().apply {
+    put(MediaStore.Downloads.DISPLAY_NAME,name.substringAfterLast('/'))
+    put(MediaStore.Downloads.MIME_TYPE,mime.ifBlank{"application/octet-stream"})
+    put(MediaStore.Downloads.RELATIVE_PATH,Environment.DIRECTORY_DOWNLOADS)
+    put(MediaStore.Downloads.IS_PENDING,1)
+   }
+   contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,values)
+    ?:throw IOException("Unable to reserve Downloads storage")
+  }else{
+   val dir=File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?:filesDir,"pending")
+   if(!dir.exists()&&!dir.mkdirs())throw IOException("Cannot create download directory")
+   val safeName=name.substringAfterLast('/').replace(Regex("[^a-zA-Z0-9._-]"),"_").take(80)
+   Uri.fromFile(File(dir,id.toString()+"-"+safeName+".part"))
+  }
+  if(!targets.edit().putString(id.toString(),dest.toString()).commit()){
+   if(dest.scheme=="content")runCatching{contentResolver.delete(dest,null,null)}
+   throw IOException("Could not save download resume information")
+  }
+  return dest
+ }
+ private fun targetLength(uri:Uri):Long {
+  return if(uri.scheme=="content"){
+   contentResolver.openFileDescriptor(uri,"r")?.use{descriptor->
+    java.io.FileInputStream(descriptor.fileDescriptor).channel.size()
+   }?:throw IOException("Unable to access pending download file")
+  }else File(uri.path?:throw IOException("Missing target file path")).length()
+ }
+ private fun stagedLength(id:Long):Long {
+  val uri=targets.getString(id.toString(),null)
+  return if(uri==null)File(cacheDir,"transfer_"+id+".part").length()
+   else try{targetLength(Uri.parse(uri))}catch(_:Exception){0L}
+ }
+ private fun truncateDestination(uri:Uri){
+  if(uri.scheme=="content"){
+   contentResolver.openFileDescriptor(uri,"rw")?.use{descriptor->
+    FileOutputStream(descriptor.fileDescriptor).channel.truncate(0L)
+   }?:throw IOException("Unable to reset pending download")
+  }else{
+   RandomAccessFile(File(uri.path?:throw IOException("Missing file path")),"rw").use{it.setLength(0L)}
+  }
+ }
+ private fun finishDestination(id:Long,uri:Uri,name:String,mime:String):Uri {
+  if(uri.scheme=="content"){
+   val changed=contentResolver.update(uri,ContentValues().apply{
+    put(MediaStore.Downloads.IS_PENDING,0)
+   },null,null)
+   if(changed<1)throw IOException("Android could not publish the downloaded file")
+   return uri
+  }
+  val original=File(uri.path?:throw IOException("Missing download path"))
+  val safe=name.substringAfterLast('/').replace(Regex("[^a-zA-Z0-9._-]"),"_").take(80)
+  val dest=File(original.parentFile?.parentFile?:filesDir,safe)
+  if(dest.exists())throw IOException("A file with the same name already exists")
+  if(!original.renameTo(dest))throw IOException("Could not rename completed download")
+  return Uri.fromFile(dest)
+ }
+ private fun transferDirect(task:Task,fields:List<String>):Triple<String,String,Uri> {
+  val (url,name,mime,agent,cookie)=fields
+  val referer=fields.getOrElse(5){""}
+  val dest=pendingDestination(task.id,name,mime)
+  var attempt=0
+  while(true){
+   if(task.cancelled)throw IOException("Download paused")
+   attempt++
+   var offset=targetLength(dest)
+   val previous=try{JSONObject(statuses.getString(task.id.toString(),"{}")?:"{}")}catch(_:Exception){JSONObject()}
+   val expected=previous.optLong("size",-1L)
+   // After a complete transfer, never fetch 2+ GB again just because publishing failed.
+   if(expected>0L && offset==expected){
+    saveStatus(task.id,"Saving file",expected,offset)
+    return Triple(name,mime,finishDestination(task.id,dest,name,mime))
+   }
+   var conn=openConnection(url,agent,cookie,referer,offset)
+   task.connection=conn
+   try{
+    var code=conn.responseCode
+    if(offset>0L && (code==200 || code==416)){
+     if(code==416){
+      val advertised=conn.getHeaderField("Content-Range")?:""
+      val serverSize=advertised.substringAfter("*/","").toLongOrNull()
+      if(serverSize!=null&&serverSize==offset){
+       saveStatus(task.id,"Saving file",offset,offset)
+       return Triple(name,mime,finishDestination(task.id,dest,name,mime))
+      }
+     }
+     // The server won't resume. Restart this one transfer safely, not all downloads.
+     conn.disconnect()
+     truncateDestination(dest)
+     offset=0L
+     conn=openConnection(url,agent,cookie,referer,0L)
+     task.connection=conn
+     code=conn.responseCode
+    }
+    if(code!=200 && code!=206)throw IOException("HTTP "+code+" downloading file")
+    if(code==206){
+     val range=conn.getHeaderField("Content-Range")?:""
+     if(!range.startsWith("bytes "+offset+"-"))throw IOException("Invalid resume range from server")
+    }
+    val type=conn.contentType?.substringBefore(';')?.trim()?.lowercase(java.util.Locale.ROOT).orEmpty()
+    val isBinary=name.substringAfterLast('.',"").lowercase(java.util.Locale.ROOT) in
+     setOf("mp4","mkv","webm","avi","mov","mp3","pdf","zip","rar","apk","7z") ||
+     mime.startsWith("video/") || mime.startsWith("audio/")
+    if(isBinary && type=="text/html")throw IOException("Server returned a webpage instead of file data")
+    val length=conn.contentLengthLong
+    val total=if(length>=0L)offset+length else -1L
+    var done=offset
+    var lastBytes=offset
+    var lastTime=SystemClock.elapsedRealtime()
+    saveStatus(task.id,"Downloading",total,done)
+    fun consume(write:(ByteArray,Int)->Unit){
+     conn.inputStream.use{input->
+      val buf=ByteArray(65536)
+      while(!task.cancelled){
+       val n=input.read(buf)
+       if(n<0)break
+       write(buf,n)
+       done+=n
+       val now=SystemClock.elapsedRealtime()
+       if(now-lastTime>=800L){
+        val speed=((done-lastBytes)*1000L/(now-lastTime).coerceAtLeast(1L)).coerceAtLeast(0L)
+        saveStatus(task.id,"Downloading",total,done,speed)
+        refreshNotification()
+        lastBytes=done;lastTime=now
+       }
+      }
+     }
+    }
+    if(dest.scheme=="content"){
+     contentResolver.openFileDescriptor(dest,"rw")?.use{descriptor->
+      FileOutputStream(descriptor.fileDescriptor).use{output->
+       if(offset==0L)output.channel.truncate(0L)
+       output.channel.position(offset)
+       consume{bytes,n->output.write(bytes,0,n)}
+       output.fd.sync()
+      }
+     }?:throw IOException("Cannot write to Android Downloads storage")
+    }else{
+     RandomAccessFile(File(dest.path?:throw IOException("Missing target path")),"rw").use{output->
+      output.setLength(offset)
+      output.seek(offset)
+      consume{bytes,n->output.write(bytes,0,n)}
+      output.fd.sync()
+     }
+    }
+    if(task.cancelled)throw IOException("Download paused")
+    if(total>=0L && done!=total)throw IOException("Incomplete transfer: "+done+"/"+total)
+    saveStatus(task.id,"Saving file",total,done)
+    val finalUri=finishDestination(task.id,dest,name,mime)
+    return Triple(name,mime,finalUri)
+   }catch(e:Exception){
+    if(task.cancelled)throw e
+    val current=try{JSONObject(statuses.getString(task.id.toString(),"{}")?:"{}")}catch(_:Exception){JSONObject()}
+    if(current.optString("state")=="Saving file")
+     throw IOException("Finalizing file failed: "+(e.message?:"storage error"),e)
+    if(attempt>=5 || e.message?.startsWith("Server returned a webpage")==true)throw e
+    val retryDelay=(1500L shl (attempt-1)).coerceAtMost(12000L)
+    saveStatus(task.id,"Retrying ("+(attempt+1)+"/5): "+(e.message?:"connection problem"),
+     totalSafe(targetLength(dest)))
+    Thread.sleep(retryDelay)
+   }finally{
+    conn.disconnect()
+    task.connection=null
+   }
+  }
+ }
+ private fun totalSafe(value:Long):Long=value.coerceAtLeast(0L)
 
  private fun openConnection(url:String,agent:String,cookie:String,referer:String,offset:Long):HttpURLConnection {
   return (URL(url).openConnection() as HttpURLConnection).apply {
