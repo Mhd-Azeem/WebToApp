@@ -44,7 +44,7 @@ func _ready() -> void:
 	G.profile_mesh(self,[[-0.87,0.24,-1.1,-0.39],[-0.70,0.22,-1.07,-0.43],[-0.55,0.20,-1.0,-0.69]],leather).position.x=0.65
 	G.box(self,Vector3(0.58,-0.26,-0.82),Vector3(0.35,0.19,0.025),trim)
 	G.box(self,Vector3(0.58,-0.26,-0.80),Vector3(0.32,0.16,0.018),rubber)
-	var screen := G.label(self,"AZ CONNECT\nCOLOMBO  â€¢  24Â°C",Vector3(0.58,-0.26,-0.78),22)
+	var screen := G.label(self,"AZ CONNECT\nCOLOMBO  ·  24°C",Vector3(0.58,-0.26,-0.78),22)
 	screen.pixel_size=0.0016
 	screen.outline_size=0
 	screen.modulate=Color(0.38,0.8,0.9)
@@ -215,10 +215,12 @@ func _process(delta: float) -> void:
 	for i in range(mirrors.size()):
 		var cam := mirror_cameras[i]
 		var side := 1.0 if i==0 else -1.0
+		mirrors[i].render_target_update_mode=SubViewport.UPDATE_DISABLED
+		if not visible or mirror_elapsed<(0.1 if low_quality else 1.0/20.0): continue
 		cam.global_position=vehicle.to_global(Vector3(side*1.05,1.25,0.4) if i<2 else Vector3(0,1.45,-2.3))
 		cam.look_at(cam.global_position-vehicle.global_basis.z*15+vehicle.global_basis.x*(side*3 if i<2 else 0.0),vehicle.global_basis.y)
-		mirrors[i].render_target_update_mode=SubViewport.UPDATE_ONCE if visible and mirror_elapsed>=(0.1 if low_quality else 1.0/30) else SubViewport.UPDATE_DISABLED
-	if mirror_elapsed>=(0.1 if low_quality else 1.0/30): mirror_elapsed=0
+		mirrors[i].render_target_update_mode=SubViewport.UPDATE_ONCE
+	if mirror_elapsed>=(0.1 if low_quality else 1.0/20.0): mirror_elapsed=0
 	if not visible and owner_finger!=-1: cancel()
 
 func cancel() -> void:
@@ -282,3 +284,7 @@ func drag(pos: Vector2) -> void:
 
 func _notification(what: int) -> void:
 	if what in [NOTIFICATION_APPLICATION_FOCUS_OUT,NOTIFICATION_APPLICATION_PAUSED] and is_instance_valid(vehicle): cancel()
+
+func set_headlights(enabled: bool) -> void:
+	headlights=enabled
+	for lamp in lamps: lamp.visible=enabled

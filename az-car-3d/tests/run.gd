@@ -164,6 +164,7 @@ func world_test() -> void:
 	check(scene.car.position.z < -250 and scene.car.position.y > -1,"Powered car crosses city boundary onto extended road")
 	print("Extended-road powered drive: ",scene.car.position)
 	scene.car.release_controls()
+	scene.traffic.set_density(8)
 	scene.settings.traffic_toggle.button_pressed=true
 	await physics_frame
 	await physics_frame
@@ -227,8 +228,10 @@ func world_test() -> void:
 	check(scene.car.position.y>-1,"High-speed road collision supports car")
 	print("High-speed drive peak: ",max_kph," km/h, gear ",scene.car.transmission.auto_gear,", position ",scene.car.position)
 	var landscape = scene.find_child("Landscape",true,false)
-	check(landscape!=null and landscape.tree_count>100 and landscape.terrain_count>150,"Trees and terrain cover extended world")
+	check(landscape!=null and landscape.tree_count>20 and landscape.terrain_count<100,"Terrain streaming bounds the active chunk count")
 	var hill: Vector3=Vector3(305.2,0,507.3)
+	landscape.stream_at(hill, true)
+	await physics_frame
 	hill.y=landscape.height_at(hill.x,hill.z)
 	var terrain_hit: Dictionary = scene.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(hill+Vector3(0,15,0),hill-Vector3(0,5,0)))
 	check(not terrain_hit.is_empty(),"Off-road terrain has collision")

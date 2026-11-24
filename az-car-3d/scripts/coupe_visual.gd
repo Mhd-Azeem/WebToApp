@@ -81,12 +81,22 @@ static func build(parent: Node3D, color: Color,kind := "sedan") -> Node3D:
 	var glass := G.material("",Color(0.055,0.10,0.135))
 	glass.metallic=0.2
 	glass.roughness=0.16
+	if kind == "truck":
+		G.box(visual, Vector3(0,1.58,-0.76), Vector3(1.92,1.72,2.5), paint)
+		visual.scale.z = 1.22
+	elif kind == "motorcycle":
+		visual.scale = Vector3(0.31,0.69,0.48)
+	elif kind == "tuk-tuk":
+		visual.scale = Vector3(0.69,1.08,0.58)
 	var height := 1.44
 	var rear := -0.86
 	if kind=="hatchback": rear=-1.65
 	elif kind=="suv": height=1.78; rear=-1.65
 	elif kind=="van": height=2.02; rear=-1.90
 	elif kind=="bus": height=2.25; rear=-1.95
+	elif kind=="truck": height=2.25; rear=-0.35
+	elif kind=="motorcycle": height=1.18; rear=-0.15
+	elif kind=="tuk-tuk": height=1.74; rear=-1.90
 	G.profile_mesh(visual,[[-2.0,0.81,1.0,1.08],[rear,0.70,1.01,height],[0.10,0.71,1.01,height],[0.99,0.83,1.0,1.08]],glass)
 	G.profile_mesh(visual,[[rear,0.69,height-0.03,height+0.03],[rear+0.15,0.70,height-0.02,height+0.04],[0.10,0.70,height-0.02,height+0.04],[0.18,0.68,height-0.03,height+0.03]],paint)
 	for z in [rear+0.12,-0.50,0.12]:

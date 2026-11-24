@@ -4,6 +4,12 @@ var bulbs: Array[MeshInstance3D] = []
 var lit: Array[StandardMaterial3D] = []
 var dark: Material
 var last_state := -1
+
+static func permits(north_south: bool, time_seconds := -1.0) -> bool:
+	var clock := time_seconds if time_seconds >= 0 else Time.get_ticks_msec()/1000.0
+	var phase := fposmod(clock, 24.0)
+	return phase < 10.0 if north_south else phase >= 12.0 and phase < 22.0
+
 func _ready() -> void:
 	dark=G.material("",Color(0.035,0.043,0.045))
 	for color in [Color(1,0.08,0.02),Color(1,0.62,0.02),Color(0.05,0.85,0.24)]:

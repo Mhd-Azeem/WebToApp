@@ -55,9 +55,9 @@ func _ready() -> void:
 	G.label(self,"COLOMBO • FORT / PETTAH",Vector3(-45,10,-138),45)
 	G.label(self,"GALLE FACE PROMENADE",Vector3(-121,4,45),28).rotation.y=PI/2
 	G.label(self,"KANDY ROAD →
-Future hill-country district",Vector3(7,5,-181),25)
+Highland route via Paddy Lane",Vector3(7,5,-181),25)
 	G.label(self,"← GALLE COAST
-Future coastal district",Vector3(96,5,181),25).rotation.y=PI
+South coastal road",Vector3(96,5,181),25).rotation.y=PI
 	for z in [-188.0,188.0]:
 		for span in [Vector2(-140,-108),Vector2(-84,-12),Vector2(12,84),Vector2(108,148),Vector2(172,180)]:
 			G.box(self,Vector3((span.x+span.y)/2,0.8,z),Vector3(span.y-span.x,1.6,2),ground,true)
@@ -86,6 +86,9 @@ Future coastal district",Vector3(96,5,181),25).rotation.y=PI
 	var extension := Node3D.new()
 	extension.set_script(preload("res://scripts/road_extension.gd"))
 	add_child(extension)
+	var region := preload("res://scripts/regional_road.gd").new()
+	region.name = "RegionalRoad"
+	add_child(region)
 	var landscape := Node3D.new()
 	landscape.name="Landscape"
 	landscape.set_script(preload("res://scripts/landscape.gd"))

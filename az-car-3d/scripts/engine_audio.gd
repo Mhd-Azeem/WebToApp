@@ -3,6 +3,9 @@ extends Node
 const RATE := 16000
 static var cache := {}
 var car: VehicleBody3D
+var engine_volume := 1.0
+var road_volume := 1.0
+var effects_volume := 1.0
 var layers: Array[AudioStreamPlayer] = []
 var references := PackedFloat32Array()
 var noises := {}
@@ -118,7 +121,7 @@ func _process(delta: float) -> void:
 	var t = car.transmission
 	var e = t.engine
 	if e.ignition_serial!=last_ignition:
-		ignition.volume_db=-10
+		ignition.volume_db=-10+linear_to_db(maxf(0.00001,effects_volume))
 		ignition.play()
 	audible_rpm=lerpf(audible_rpm,maxf(100,e.rpm),1-exp(-delta*18))
 	frequency=audible_rpm*car.transmission.config.engine_cylinders/120.0
@@ -133,12 +136,12 @@ func _process(delta: float) -> void:
 		elif i>0 and audible_rpm<=references[i]: weight=clampf((audible_rpm-references[i-1])/(references[i]-references[i-1]),0,1)
 		layer_weights[i]=weight
 		layers[i].pitch_scale=clampf(audible_rpm/references[i],0.25,4)
-		_volume(layers[i],weight*engine_mix*ENGINE_GAIN,delta,35 if e.ignition_cut else 14)
-	_volume(starter,0.75 if e.state==1 else 0.0,delta)
+		_volume(layers[i],weight*engine_mix*ENGINE_GAIN*engine_volume,delta,35 if e.ignition_cut else 14)
+	_volume(starter,0.75*engine_volume if e.state==1 else 0.0,delta)
 	starter.pitch_scale=clampf(maxf(150,e.rpm)/400,0.5,1.7)
 	if t.shift_serial!=last_shift:
 		last_shift=t.shift_serial
-		shift_sound.volume_db=-7
+		shift_sound.volume_db=-7+linear_to_db(maxf(0.00001,effects_volume))
 		shift_sound.play()
 	if t.grind_serial!=last_grind:
 		last_grind=t.grind_serial
@@ -148,14 +151,14 @@ func _process(delta: float) -> void:
 		last_stall=e.stall_serial
 		last_shutdown=e.shutdown_serial
 		lifecycle.stream=_stream("stall" if stalled else "shutdown",0,0.4,false)
-		lifecycle.volume_db=-6
+		lifecycle.volume_db=-6+linear_to_db(maxf(0.00001,effects_volume))
 		lifecycle.play()
 	last_ignition=e.ignition_serial
 	var speed := car.linear_velocity.length()
 	var road := clampf(speed/45,0,1) if car.wheel_physics.grounded else 0.0
-	_volume(noises.rolling,road*0.24,delta)
+	_volume(noises.rolling,road*0.24*road_volume,delta)
 	noises.rolling.pitch_scale=clampf(speed/16,0.5,2.0)
-	_volume(noises.wind,pow(clampf(speed/65,0,1),1.7)*0.10,delta)
+	_volume(noises.wind,pow(clampf(speed/65,0,1),1.7)*0.10*road_volume,delta)
 	_volume(noises.brake,0.0,delta) # Remove sharp brake hiss/squeal
 	# Tire squeal disabled: retain traction/skid physics without the irritating screech.
-	_volume(noises.horn,0.8 if car.horn>0 and car.controls_enabled else 0.0,delta,25)
+	_volume(noises.horn,0.8*effects_volume if car.horn>0 and car.controls_enabled else 0.0,delta,25)

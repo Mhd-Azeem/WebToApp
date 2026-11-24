@@ -5,6 +5,7 @@ var viewport: SubViewport
 var display: TextureRect
 var label: Label
 var elapsed := 0.0
+var refresh_rate := 15.0
 var active := false
 func setup(parent: Node, car: VehicleBody3D) -> void:
 	vehicle=car
@@ -23,6 +24,7 @@ func setup(parent: Node, car: VehicleBody3D) -> void:
 	display.position=Vector2(700,95)
 	display.size=Vector2(320,180)
 	display.texture=viewport.get_texture()
+	display.expand_mode=TextureRect.EXPAND_IGNORE_SIZE
 	display.mouse_filter=Control.MOUSE_FILTER_IGNORE
 	parent.add_child(display)
 	label=Label.new()
@@ -49,6 +51,10 @@ func _process(delta: float) -> void:
 	camera.global_position=vehicle.to_global(Vector3(0,1.45,-2.35))
 	camera.look_at(camera.global_position-vehicle.global_basis.z*20,vehicle.global_basis.y)
 	elapsed+=delta
-	if elapsed>=1.0/15.0:
+	if elapsed>=1.0/refresh_rate:
 		elapsed=0
 		viewport.render_target_update_mode=SubViewport.UPDATE_ONCE
+
+func set_quality(low: bool) -> void:
+	viewport.size = Vector2i(192,108) if low else Vector2i(320,180)
+	refresh_rate = 10.0 if low else 15.0

@@ -1,6 +1,8 @@
 extends RefCounted
 class_name SriGeometry
 static var materials := {}
+static var box_meshes := {}
+static var box_shapes := {}
 
 static func material(name: String, tint: Color = Color.WHITE) -> StandardMaterial3D:
 	var key := name + str(tint)
@@ -17,9 +19,11 @@ static func material(name: String, tint: Color = Color.WHITE) -> StandardMateria
 
 static func box(parent: Node3D, pos: Vector3, size: Vector3, mat: Material, solid := false) -> MeshInstance3D:
 	var n := MeshInstance3D.new()
-	var mesh := BoxMesh.new()
-	mesh.size = size
-	n.mesh = mesh
+	if not box_meshes.has(size):
+		var mesh := BoxMesh.new()
+		mesh.size = size
+		box_meshes[size] = mesh
+	n.mesh = box_meshes[size]
 	n.material_override = mat
 	n.position = pos
 	n.visibility_range_end = 230.0
@@ -27,9 +31,13 @@ static func box(parent: Node3D, pos: Vector3, size: Vector3, mat: Material, soli
 	if solid:
 		var body := StaticBody3D.new()
 		var shape := CollisionShape3D.new()
-		var resource := BoxShape3D.new()
-		resource.size = size
-		shape.shape = resource
+		if not box_shapes.has(size):
+			var resource := BoxShape3D.new()
+			resource.size = size
+			box_shapes[size] = resource
+		shape.shape = box_shapes[size]
+		if mat is StandardMaterial3D and mat.albedo_texture and mat.albedo_texture.resource_path.ends_with("/asphalt.png"):
+			body.set_meta("surface", "asphalt")
 		body.add_child(shape)
 		n.add_child(body)
 	return n
