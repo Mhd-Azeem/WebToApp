@@ -38,7 +38,6 @@ class DownloadService : Service() {
   const val ACTION_START = "com.webtoapp.template.START_TRANSFER"
   const val ACTION_PAUSE = "com.webtoapp.template.PAUSE_TRANSFER"
   const val ACTION_REMOVE = "com.webtoapp.template.REMOVE_TRANSFER"
-  const val ACTION_RESTART = "com.webtoapp.template.RESTART_TRANSFER"
   const val EXTRA_ID = "transfer_id"
   private const val CHANNEL = "webtoapp_background_downloads"
   private const val NOTIFICATION_ID = 2601
@@ -78,45 +77,6 @@ class DownloadService : Service() {
      return START_NOT_STICKY
     }
     startTask(id)
-   }
-   action == ACTION_RESTART && id > 0 -> {
-    // Explicit user choice to discard old progress and start at byte zero.
-    // Never delete an active transfer or a published completed file.
-    if(running.containsKey(id)) {
-     saveStatusPreservingProgress(id,"Paused: wait for current transfer to stop before restarting")
-    }else if(metadata.contains(id.toString())) {
-     val old=try{JSONObject(statuses.getString(id.toString(),"{}")?:"{}")}catch(_:Exception){JSONObject()}
-     if(old.optString("state")=="Completed") {
-      saveStatusPreservingProgress(id,"Completed")
-     }else {
-      if(!startForegroundSafely()) {
-       saveStatusPreservingProgress(id,"Failed: Android blocked download service")
-       stopSelf()
-       return START_NOT_STICKY
-      }
-      try {
-       val pending=targets.getString(id.toString(),null)
-       if(pending!=null) {
-        val uri=Uri.parse(pending)
-        if(uri.scheme=="content")contentResolver.delete(uri,null,null)
-        else if(uri.scheme=="file")File(uri.path?:"").delete()
-       }
-       // An existing part file belongs to this download ID only.
-       val legacy=File(cacheDir,"transfer_"+id+".part")
-       if(legacy.exists()&&!legacy.delete())throw IOException("Unable to delete old partial download")
-       if(!targets.edit().remove(id.toString()).commit())
-        throw IOException("Unable to reset download destination")
-       statuses.edit().remove(id.toString()).commit()
-       startTask(id)
-      }catch(e:Exception){
-       saveStatus(id,"Failed to restart: "+(e.message?:"storage error"))
-       stopIfIdle()
-      }
-     }
-    }else{
-     saveStatus(id,"Failed to restart: download record no longer exists")
-     stopIfIdle()
-    }
    }
    action == ACTION_PAUSE && id > 0 -> {
     running[id]?.let { it.cancelled = true; it.connection?.disconnect() }
@@ -342,13 +302,15 @@ class DownloadService : Service() {
    try {
     var code = conn.responseCode
     if(offset > 0 && (code == 200 || code == 416)) {
-     // Some sites don't support byte ranges (or content changed). Restart cleanly.
-     conn.disconnect()
-     offset=0
-     file.delete()
-     conn=openConnection(url,agent,cookie,referer,0)
-     task.connection=conn
-     code=conn.responseCode
+     // Protect partial data for transfers created by previous app versions too.
+     if(code==416){
+      val advertised=conn.getHeaderField("Content-Range")?:""
+      if(advertised.substringAfter("*/","").toLongOrNull()==offset){
+       saveStatus(task.id,"Saving file",offset,offset)
+       return Triple(name,mime,publishFile(file,name,mime))
+      }
+     }
+     throw IOException("Server cannot resume saved bytes; progress kept. Start a new download from its link.")
     }
     if(code != 200 && code != 206) {
      val explanation=when(code){
@@ -564,13 +526,11 @@ class DownloadService : Service() {
        return Triple(name,mime,finishDestination(task.id,dest,name,mime))
       }
      }
-     // The server won't resume. Restart this one transfer safely, not all downloads.
-     conn.disconnect()
-     truncateDestination(dest)
-     offset=0L
-     conn=openConnection(url,agent,cookie,referer,0L)
-     task.connection=conn
-     code=conn.responseCode
+     // Never silently delete downloaded bytes when Resume is pressed.
+     // A fresh click creates a separate transfer ID and starts at byte zero.
+     throw IOException(if(code==200)
+      "Server does not support resuming this file; saved progress kept. Start a new download from its link."
+      else "Cannot resume: server does not recognize saved bytes; saved progress kept.")
     }
     if(code!=200 && code!=206)throw IOException("HTTP "+code+" downloading file")
     if(code==206){
