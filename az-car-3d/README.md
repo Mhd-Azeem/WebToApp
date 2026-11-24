@@ -82,3 +82,11 @@ v0.5 adds more sensitive steering, the player coupe in eight traffic colors,
 rolling terrain, hills, trees, shrubs, rocks, city parks, beach and sea. See
 docs/LANDSCAPE_UPDATE.md for the generated scenery and mobile rendering limits.
 
+
+## v0.7.0 regional driving update
+
+Open the map button or press Tab for GPS, garage and missions. Stop at a marked destination and select Interact or press G. Stations sell fuel for two credits per litre and offer repairs. Parking, delivery and highland drives award credits. Free roam is available immediately. The garage offers coupe, hatchback and SUV profiles, five paints and three alloy finishes. Progress saves locally every 15 seconds and on service and garage actions.
+
+The eastern road links the north and south Paddy Lane junctions via a graded highland road, a covered passage and a bridge. Terrain and rural foliage load in 80 m tiles. Core city and road collisions stay resident. Settings include four graphics tiers, an adaptive mode with 30/60 FPS targets, traffic density tied to graphics, optional performance counters, weather, day/night, driving aids, audio mix and touch steering. V cycles cockpit, hood, orbit and chase. C or Shift operates the clutch. Drag the center of the screen or use the right mouse button to orbit. Reset recalls the last grounded asphalt checkpoint.
+
+Android uses package com.azeem.azcar3d.colombo and version code 7. The dedicated Android workflow publishes a versioned preview after its Android and Windows checks. Device-specific frame pacing, battery use, heat, cutouts, tilt orientation and speaker balance require physical testing.
