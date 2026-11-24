@@ -26,6 +26,7 @@ func run() -> void:
 	venues.update(true)
 	check(venues.rooms.is_empty(),"Walking away frees the interior")
 	var crowd=scene.pedestrians
+	crowd.relationships=ConfigFile.new()
 	var actor=crowd.actors[0]
 	actor.body.position=scene.car.to_global(Vector3(-2.5,0.15,0.21))
 	walker.position=actor.body.position+Vector3(0,0,0.7)
