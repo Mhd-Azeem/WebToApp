@@ -223,7 +223,13 @@ class DownloadService : Service() {
   val task = Task(id)
   if(running.putIfAbsent(id, task) != null) return
   val last=try{ JSONObject(statuses.getString(id.toString(),"{}")?:"{}") }catch(_:Exception){ JSONObject() }
-  saveStatus(id,"Connecting",last.optLong("size",-1L),stagedLength(id).coerceAtLeast(0L))
+  val storedBytes=stagedLength(id).coerceAtLeast(0L)
+  // If a provider lost the pending file, retain our recorded byte count so
+  // pendingDestination can warn instead of silently creating a blank replacement.
+  val recordedBytes=last.optLong("done",0L).coerceAtLeast(0L)
+  val reportedBytes=if(targets.contains(id.toString()) && storedBytes==0L && recordedBytes>0L)
+   recordedBytes else storedBytes
+  saveStatus(id,"Connecting",last.optLong("size",-1L),reportedBytes)
   refreshNotification(true)
   Thread({
    try {
