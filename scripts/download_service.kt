@@ -48,6 +48,9 @@ class DownloadService : Service() {
   @Volatile var connection: HttpURLConnection? = null
  }
  private val running = ConcurrentHashMap<Long, Task>()
+ // A user can tap Resume while the previous paused worker is still exiting.
+ // Queue the request, then resume only after its file descriptor has closed.
+ private val resumeWhenIdle = ConcurrentHashMap.newKeySet<Long>()
  private val metadata by lazy { getSharedPreferences("resumable_transfers", MODE_PRIVATE) }
  private val statuses by lazy { getSharedPreferences("transfer_status", MODE_PRIVATE) }
  private val targets by lazy { getSharedPreferences("transfer_targets", MODE_PRIVATE) }
@@ -76,14 +79,18 @@ class DownloadService : Service() {
      stopSelf()
      return START_NOT_STICKY
     }
-    startTask(id)
+    val previous=running[id]
+    if(previous?.cancelled==true)resumeWhenIdle.add(id)
+    else startTask(id)
    }
    action == ACTION_PAUSE && id > 0 -> {
+    resumeWhenIdle.remove(id)
     running[id]?.let { it.cancelled = true; it.connection?.disconnect() }
     saveStatusPreservingProgress(id, "Paused")
     stopIfIdle()
    }
    action == ACTION_REMOVE && id > 0 -> {
+    resumeWhenIdle.remove(id)
     running[id]?.let { it.removed = true; it.cancelled = true; it.connection?.disconnect() }
     val previous=try { JSONObject(statuses.getString(id.toString(),"{}")?:"{}") } catch(_:Exception){ JSONObject() }
     val pending=targets.getString(id.toString(),null)
@@ -264,7 +271,11 @@ class DownloadService : Service() {
     }
    } finally {
     running.remove(id, task)
-    if(running.isEmpty()) stopIfIdle() else refreshNotification(true)
+    if(resumeWhenIdle.remove(id) && metadata.contains(id.toString())){
+     startTask(id)
+    }else{
+     if(running.isEmpty())stopIfIdle() else refreshNotification(true)
+    }
    }
   }, "WebToApp-Download-" + id).start()
  }
