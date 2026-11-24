@@ -85,7 +85,7 @@ class MainActivity:AppCompatActivity(){
  }
  private fun persistTransfer(t:Transfer){
   getSharedPreferences("resumable_transfers",MODE_PRIVATE).edit().putString(t.id.toString(),
-   listOf(t.url,t.filename,t.mime,t.agent,t.cookie,t.referer).joinToString(31.toChar().toString())).apply()
+   listOf(t.url,t.filename,t.mime,t.agent,t.cookie,t.referer,t.size.toString()).joinToString(31.toChar().toString())).apply()
  }
  // The foreground service writes progress to persistent preferences. UI only observes it.
  private fun refreshTransfers(){
@@ -556,7 +556,7 @@ class MainActivity:AppCompatActivity(){
    }
    override fun onCloseWindow(window:WebView){val i=tabs.indexOf(window);if(i>=0)closeTab(i)}
   }
-  w.setDownloadListener{url,agent,disposition,mime,_->
+  w.setDownloadListener{url,agent,disposition,mime,contentLength->
    try{
     if(getSharedPreferences("web_settings",MODE_PRIVATE).getBoolean("wifi_only",false)){
      val cm=getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -570,6 +570,7 @@ class MainActivity:AppCompatActivity(){
     val id=newTransferId()
     val transfer=Transfer(id,url,filename,mime?: "",agent?:w.settings.userAgentString,
      CookieManager.getInstance().getCookie(url)?:"",w.url?:"")
+    transfer.size=contentLength.takeIf{it>0L}?:-1L
     transfers[id]=transfer
     persistTransfer(transfer)
     startTransfer(transfer)
