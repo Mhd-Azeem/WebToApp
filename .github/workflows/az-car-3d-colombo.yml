@@ -79,6 +79,11 @@ jobs:
           set -euo pipefail
           godot --headless --path az-car-3d --fixed-fps 60 --script res://tests/on_foot_checks.gd 2>&1 | tee az-car-3d/build/on-foot-tests.log
           if grep -E 'SCRIPT ERROR|ERROR:' az-car-3d/build/on-foot-tests.log; then exit 1; fi
+      - name: Validate pedestrian simulation and dialogue
+        run: |
+          set -euo pipefail
+          godot --headless --path az-car-3d --fixed-fps 60 --script res://tests/pedestrian_checks.gd 2>&1 | tee az-car-3d/build/pedestrian-tests.log
+          if grep -E 'SCRIPT ERROR|ERROR:' az-car-3d/build/pedestrian-tests.log; then exit 1; fi
       - name: Export debug Android APK
         run: |
           set -euo pipefail

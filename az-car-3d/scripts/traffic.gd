@@ -56,7 +56,7 @@ func _populate() -> void:
 		var kind: String = KINDS[i % KINDS.size()]
 		var body := CharacterBody3D.new()
 		body.collision_layer = 0
-		body.collision_mask = 3
+		body.collision_mask = 11
 		body.hide()
 		add_child(body)
 		var shape := CollisionShape3D.new()
@@ -203,7 +203,7 @@ func _drive(i: int, delta: float) -> void:
 	if not passing[i]:
 		desired=minf(desired,maxf(0,(gap_ahead-6.0)*0.65))
 	var origin := body.position+Vector3.UP*0.8
-	var query := PhysicsRayQueryParameters3D.create(origin,origin+direction*(4.8+speeds[i]*0.8),3)
+	var query := PhysicsRayQueryParameters3D.create(origin,origin+direction*(4.8+speeds[i]*0.8),11)
 	query.exclude=[body.get_rid()]
 	if not get_world_3d().direct_space_state.intersect_ray(query).is_empty(): desired=0
 	speeds[i]=move_toward(speeds[i],desired,delta*(7 if desired<speeds[i] else 2.5))

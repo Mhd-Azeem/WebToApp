@@ -19,7 +19,7 @@ var landed_time := 0.0
 
 func _ready() -> void:
 	collision_layer=8
-	collision_mask=3
+	collision_mask=11
 	floor_snap_length=0.38
 	floor_max_angle=deg_to_rad(47)
 	capsule=CapsuleShape3D.new()

@@ -43,6 +43,7 @@ var orbit_finger := -1
 var camera_initialized := false
 var previous_camera_mode := -1
 var on_foot: Node
+var pedestrians: Node3D
 
 func _ready() -> void:
 	desktop_mode=OS.has_feature("windows") or OS.has_feature("linux") or OS.has_feature("macos")
@@ -240,6 +241,10 @@ func _hud() -> void:
 		if on_foot.person.model.animations!=null: on_foot.person.model.dress(i))
 	on_foot.mode_changed.connect(_mobility_changed)
 	on_foot.interact_requested.connect(_walk_interact)
+	pedestrians=preload("res://scripts/people/pedestrians.gd").new()
+	add_child(pedestrians)
+	pedestrians.setup(layer,car)
+	pedestrians.panel.visibility_changed.connect(_settings_visibility)
 	_layout_controls()
 	get_viewport().size_changed.connect(_layout_controls)
 	if desktop_mode:
@@ -309,6 +314,7 @@ func _pedal(id: String,value: float) -> void:
 
 func _settings_visibility() -> void:
 	var available: bool = not settings.visible and not gameplay.panel.visible
+	if is_instance_valid(pedestrians): available=available and not pedestrians.panel.visible
 	if is_instance_valid(on_foot):
 		on_foot.enabled=available
 		if not available: on_foot.clear_input()
@@ -356,6 +362,9 @@ func _press(id: String, down: bool) -> void:
 
 func _input(event: InputEvent) -> void:
 	if not is_instance_valid(gameplay): return
+	if is_instance_valid(pedestrians) and pedestrians.panel.visible:
+		if event is InputEventKey and event.pressed and event.keycode in [KEY_ESCAPE,KEY_G]: pedestrians.respond("Close")
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode==KEY_TAB:
 			_press("regions",true)
@@ -508,6 +517,7 @@ func _apply_quality() -> void:
 	landscape.set_detail(distance + 35, Graphics.VEGETATION[tier])
 	rear_view.set_quality(low)
 	traffic.set_density(Graphics.TRAFFIC[tier])
+	if is_instance_valid(pedestrians): pedestrians.graphics_tier=tier
 
 func _notification(what: int) -> void:
 	if what in [NOTIFICATION_APPLICATION_FOCUS_OUT,NOTIFICATION_APPLICATION_PAUSED] and is_instance_valid(car):
@@ -580,6 +590,9 @@ func _update_weather() -> void:
 	weather_elapsed=0
 	var weather := weather_selector.selected
 	var night := clampf(sin(day_time*TAU)*0.8+0.2,0,1)
+	if is_instance_valid(pedestrians):
+		pedestrians.daylight=night
+		pedestrians.raining=weather==1
 	var env := get_world_3d().environment
 	env.ambient_light_energy=lerpf(0.26,0.65,night)
 	sun.light_energy=lerpf(0.10,1.1,night)*(0.70 if weather==1 else 1.0)
@@ -599,9 +612,11 @@ func _update_weather() -> void:
 func _mobility_changed(walking: bool) -> void:
 	landscape.player=on_foot.person if walking else car
 	traffic.player=landscape.player
+	if is_instance_valid(pedestrians): pedestrians.focus=landscape.player
 	gameplay.walker=on_foot.person if walking else null
 	rear_view.suspended=walking
 	_settings_visibility()
 
 func _walk_interact() -> void:
+	if on_foot.walking and pedestrians.interact(): return
 	gameplay.interact()
