@@ -129,11 +129,37 @@ class DownloadService : Service() {
   return START_STICKY
  }
 
+ // Always display MB through exactly 1024 MB; switch to GB above that.
+ private fun notificationAmount(bytes:Long):String{
+  val megabytes=bytes.coerceAtLeast(0L).toDouble()/(1024.0*1024.0)
+  return if(megabytes<=1024.0)
+   String.format(java.util.Locale.US,"%.1f MB",megabytes)
+  else String.format(java.util.Locale.US,"%.2f GB",megabytes/1024.0)
+ }
+ private fun notificationTime(seconds:Long):String{
+  val safe=seconds.coerceAtLeast(0L)
+  val hours=safe/3600L
+  val minutes=(safe%3600L)/60L
+  return if(hours>0L)hours.toString()+"h "+minutes.toString()+"m"
+   else if(minutes>0L)minutes.toString()+"m "+(safe%60L).toString()+"s"
+   else safe.toString()+"s"
+ }
+ private fun notificationEta(state:String,size:Long,done:Long,speed:Long):String{
+  if(state=="Saving file")return "Saving file…"
+  if(state.startsWith("Retrying"))return "Retrying…"
+  if(state=="Connecting")return "Connecting…"
+  if(state.startsWith("Queued"))return "Waiting in queue"
+  if(state!="Downloading")return state
+  if(size>0L && done>=size)return "Finishing file…"
+  if(size<=0L || speed<=0L)return "Estimating time…"
+  val seconds=((size-done).coerceAtLeast(0L)+speed-1L)/speed
+  return "~"+notificationTime(seconds)+" left"
+ }
  private fun notification(): Notification {
-  val open = PendingIntent.getActivity(this,0,Intent(this,MainActivity::class.java),
+  val open=PendingIntent.getActivity(this,0,Intent(this,MainActivity::class.java),
    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-  val activeIds = running.keys.toList()
-  val count = activeIds.size
+  val activeIds=running.keys.toList()
+  val count=activeIds.size
   val builder=NotificationCompat.Builder(this,CHANNEL)
    .setSmallIcon(android.R.drawable.stat_sys_download)
    .setContentTitle(if(count==1)"Downloading file" else "Background downloads")
@@ -142,28 +168,55 @@ class DownloadService : Service() {
    .setOnlyAlertOnce(true)
    .setPriority(NotificationCompat.PRIORITY_LOW)
    .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-  if(count==1) {
+  if(count==1){
    val id=activeIds.first()
    val status=try{JSONObject(statuses.getString(id.toString(),"{}")?:"{}")}catch(_:Exception){JSONObject()}
    val raw=metadata.getString(id.toString(),"")?:""
-   val fields=raw.split(31.toChar()).let { if(it.size>=5)it else raw.split(92.toChar().toString()+"u001f") }
+   val fields=raw.split(31.toChar()).let{
+    if(it.size>=5)it else raw.split(92.toChar().toString()+"u001f")
+   }
    val filename=fields.getOrElse(1){"Download"}
-   val done=status.optLong("done",0L)
+   val done=status.optLong("done",0L).coerceAtLeast(0L)
    val size=status.optLong("size",-1L)
+   val speed=status.optLong("speed",0L).coerceAtLeast(0L)
    val state=status.optString("state","Connecting")
+   val amount=notificationAmount(done)+(if(size>0L)" / "+notificationAmount(size) else " / Unknown")
+   val remaining=notificationEta(state,size,done,speed)
+   val speedText=if(state=="Downloading"&&speed>0L)
+    notificationAmount(speed)+"/s" else ""
+   // Compact notifications prioritize bytes and ETA. Expanded notifications
+   // also show the current transfer speed and status.
    builder.setContentTitle(filename.take(48))
-    .setContentText(state+" • "+(done/1024L).toString()+" KB"+if(size>0)" / "+(size/1024L).toString()+" KB" else "")
-   if(size>0L)builder.setProgress(100,((done.toDouble()*100)/size).toInt().coerceIn(0,100),false)
-   else builder.setProgress(0,0,true)
+    .setContentText(amount+" • "+remaining)
+    .setStyle(NotificationCompat.BigTextStyle().bigText(
+     state+" • "+amount+"\n"+
+     (if(speedText.isNotEmpty())speedText+" • " else "")+remaining))
+   if(size>0L){
+    builder.setProgress(100,((done.toDouble()*100.0)/size.toDouble()).toInt().coerceIn(0,100),false)
+   }else builder.setProgress(0,0,true)
    val pause=Intent(this,DownloadService::class.java).apply{
     action=ACTION_PAUSE;putExtra(EXTRA_ID,id)
    }
    builder.addAction(android.R.drawable.ic_media_pause,"Pause",
     PendingIntent.getService(this,(id%100000).toInt(),pause,
      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
-  } else {
-   builder.setContentText(count.toString()+" active transfers")
-  }
+  }else if(count>1){
+   val summaries=activeIds.map{id->
+    try{JSONObject(statuses.getString(id.toString(),"{}")?:"{}")}catch(_:Exception){JSONObject()}
+   }
+   val done=summaries.sumOf{it.optLong("done",0L).coerceAtLeast(0L)}
+   val speed=summaries.sumOf{it.optLong("speed",0L).coerceAtLeast(0L)}
+   val known=summaries.all{it.optLong("size",-1L)>0L}
+   val size=if(known)summaries.sumOf{it.optLong("size",0L)} else -1L
+   val amount=notificationAmount(done)+(if(known)" / "+notificationAmount(size) else "")
+   val remaining=notificationEta("Downloading",size,done,speed)
+   builder.setContentText(count.toString()+" files • "+amount+" • "+remaining)
+    .setStyle(NotificationCompat.BigTextStyle().bigText(
+     count.toString()+" active downloads\n"+amount+"\n"+
+     (if(speed>0L)notificationAmount(speed)+"/s • " else "")+remaining))
+   if(known)builder.setProgress(100,((done.toDouble()*100.0)/size.toDouble()).toInt().coerceIn(0,100),false)
+   else builder.setProgress(0,0,true)
+  }else builder.setContentText("Preparing downloads…")
   return builder.build()
  }
 
