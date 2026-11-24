@@ -389,7 +389,25 @@ class DownloadService : Service() {
  // New transfers stream directly to an Android Downloads entry marked pending.
  // No second full-size copy is needed when finishing multi-GB files.
  private fun pendingDestination(id:Long,name:String,mime:String):Uri {
-  targets.getString(id.toString(),null)?.let{return Uri.parse(it)}
+  // Old target URIs can outlive their backing files (e.g. after a provider
+  // cleanup). Never replace a target that may contain downloaded bytes.
+  targets.getString(id.toString(),null)?.let{saved->
+   val uri=Uri.parse(saved)
+   val previous=try{JSONObject(statuses.getString(id.toString(),"{}")?:"{}")}catch(_:Exception){JSONObject()}
+   val recorded=previous.optLong("done",0L).coerceAtLeast(0L)
+   val actual=try{targetLength(uri)}catch(e:Exception){
+    if(recorded>0L)
+     throw IOException("Saved download location is missing; $recorded bytes were recorded. Keep this entry and check device storage before retrying.",e)
+    -1L
+   }
+   if(actual>0L || (actual==0L && recorded==0L))return uri
+   if(recorded>0L)
+    throw IOException("Saved download is missing its $recorded bytes; refusing to overwrite it")
+   // No bytes are present: only this empty target can be safely recreated.
+   if(uri.scheme=="content")runCatching{contentResolver.delete(uri,null,null)}
+   if(!targets.edit().remove(id.toString()).commit())
+    throw IOException("Cannot reset missing empty download destination")
+  }
   val dest=if(Build.VERSION.SDK_INT>=29){
    val values=ContentValues().apply {
     put(MediaStore.Downloads.DISPLAY_NAME,name.substringAfterLast('/'))
@@ -405,17 +423,38 @@ class DownloadService : Service() {
    val safeName=name.substringAfterLast('/').replace(Regex("[^a-zA-Z0-9._-]"),"_").take(80)
    Uri.fromFile(File(dir,id.toString()+"-"+safeName+".part"))
   }
+  // Inserting a MediaStore row does not guarantee a file exists yet.
+  // Open once in write mode to materialize the file *before* querying size.
+  // This is safe for a brand-new row only; never truncate resumed transfers.
+  try{
+   if(dest.scheme=="content"){
+    contentResolver.openFileDescriptor(dest,"w")?.use{}
+     ?:throw IOException("The Android Downloads provider returned no writable file")
+    contentResolver.openFileDescriptor(dest,"rw")?.use{}
+     ?:throw IOException("The Android Downloads provider cannot reopen the file")
+   }else{
+    val local=File(dest.path?:throw IOException("Missing download file path"))
+    local.parentFile?.mkdirs()
+    if(!local.exists()&&!local.createNewFile())throw IOException("Could not create download file")
+   }
+  }catch(e:Exception){
+   if(dest.scheme=="content")runCatching{contentResolver.delete(dest,null,null)}
+   else runCatching{File(dest.path?:"").delete()}
+   throw IOException("Cannot create a writable download file in Android storage: "+(e.message?:"unknown storage error"),e)
+  }
   if(!targets.edit().putString(id.toString(),dest.toString()).commit()){
    if(dest.scheme=="content")runCatching{contentResolver.delete(dest,null,null)}
+   else runCatching{File(dest.path?:"").delete()}
    throw IOException("Could not save download resume information")
   }
   return dest
  }
  private fun targetLength(uri:Uri):Long {
   return if(uri.scheme=="content"){
-   contentResolver.openFileDescriptor(uri,"r")?.use{descriptor->
+   // A seekable read/write descriptor is required for large resumable files.
+   contentResolver.openFileDescriptor(uri,"rw")?.use{descriptor->
     java.io.FileInputStream(descriptor.fileDescriptor).channel.size()
-   }?:throw IOException("Unable to access pending download file")
+   }?:throw IOException("Unable to reopen pending download file")
   }else File(uri.path?:throw IOException("Missing target file path")).length()
  }
  private fun stagedLength(id:Long):Long {
@@ -457,6 +496,9 @@ class DownloadService : Service() {
    attempt++
    var offset=targetLength(dest)
    val previous=try{JSONObject(statuses.getString(task.id.toString(),"{}")?:"{}")}catch(_:Exception){JSONObject()}
+   val previousBytes=previous.optLong("done",0L)
+   if(offset==0L && previousBytes>0L)
+    throw IOException("Stored partial file was lost or reset; refusing to overwrite $previousBytes previously downloaded bytes")
    val expected=previous.optLong("size",-1L)
    // After a complete transfer, never fetch 2+ GB again just because publishing failed.
    if(expected>0L && offset==expected){
@@ -545,7 +587,9 @@ class DownloadService : Service() {
     val current=try{JSONObject(statuses.getString(task.id.toString(),"{}")?:"{}")}catch(_:Exception){JSONObject()}
     if(current.optString("state")=="Saving file")
      throw IOException("Finalizing file failed: "+(e.message?:"storage error"),e)
-    if(attempt>=5 || e.message?.startsWith("Server returned a webpage")==true)throw e
+    if(attempt>=5 || e.message?.startsWith("Server returned a webpage")==true ||
+       e.message?.contains("refusing to overwrite")==true ||
+       e.message?.startsWith("Cannot create a writable download file")==true)throw e
     val retryDelay=(1500L shl (attempt-1)).coerceAtMost(12000L)
     saveStatus(task.id,"Retrying ("+(attempt+1)+"/5): "+(e.message?:"connection problem"),
      totalSafe(targetLength(dest)))
