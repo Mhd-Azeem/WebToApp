@@ -16,6 +16,9 @@ import android.os.Build
 import android.os.Environment
 import android.os.IBinder
 import android.os.SystemClock
+import android.os.StatFs
+import java.security.MessageDigest
+import android.util.Base64
 import android.provider.MediaStore
 import androidx.core.app.NotificationCompat
 import org.json.JSONObject
@@ -51,9 +54,11 @@ class DownloadService : Service() {
  // A user can tap Resume while the previous paused worker is still exiting.
  // Queue the request, then resume only after its file descriptor has closed.
  private val resumeWhenIdle = ConcurrentHashMap.newKeySet<Long>()
+ private val queued = ConcurrentHashMap.newKeySet<Long>()
  private val metadata by lazy { getSharedPreferences("resumable_transfers", MODE_PRIVATE) }
  private val statuses by lazy { getSharedPreferences("transfer_status", MODE_PRIVATE) }
  private val targets by lazy { getSharedPreferences("transfer_targets", MODE_PRIVATE) }
+ private val validators by lazy { getSharedPreferences("transfer_validators", MODE_PRIVATE) }
  private val manager by lazy { getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager }
  @Volatile private var foreground = false
  @Volatile private var lastNotification = 0L
@@ -84,12 +89,15 @@ class DownloadService : Service() {
     else startTask(id)
    }
    action == ACTION_PAUSE && id > 0 -> {
+    queued.remove(id)
     resumeWhenIdle.remove(id)
     running[id]?.let { it.cancelled = true; it.connection?.disconnect() }
     saveStatusPreservingProgress(id, "Paused")
     stopIfIdle()
    }
    action == ACTION_REMOVE && id > 0 -> {
+    queued.remove(id)
+    validators.edit().remove(id.toString()).apply()
     resumeWhenIdle.remove(id)
     running[id]?.let { it.removed = true; it.cancelled = true; it.connection?.disconnect() }
     val previous=try { JSONObject(statuses.getString(id.toString(),"{}")?:"{}") } catch(_:Exception){ JSONObject() }
@@ -109,7 +117,7 @@ class DownloadService : Service() {
    }
    intent == null -> { // START_STICKY restart after process termination
     val pending = statuses.all.filter { (_, value) ->
-     try { val state=JSONObject(value as String).optString("state"); state=="Downloading" || state=="Connecting" || state.startsWith("Retrying") || state=="Saving file" } catch(_:Exception) { false }
+     try { val state=JSONObject(value as String).optString("state"); state=="Downloading" || state=="Connecting" || state=="Queued" || state.startsWith("Retrying") || state=="Saving file" } catch(_:Exception) { false }
     }.keys.mapNotNull { it.toLongOrNull() }
     if(pending.isEmpty()) stopSelf()
     else if(startForegroundSafely()) pending.forEach { startTask(it) }
@@ -188,6 +196,32 @@ class DownloadService : Service() {
   stopSelf()
  }
 
+ @Synchronized private fun drainQueue(){
+  val maxActive=getSharedPreferences("web_settings",MODE_PRIVATE)
+   .getInt("parallel_downloads",2).coerceIn(1,3)
+  while(running.size<maxActive && queued.isNotEmpty()){
+   val id=queued.firstOrNull()?:break
+   queued.remove(id)
+   if(metadata.contains(id.toString()))startTask(id)
+  }
+  if(running.isEmpty())stopIfIdle() else refreshNotification(true)
+ }
+ override fun onTimeout(startId:Int,fgsType:Int){
+  // Android 15 limits dataSync foreground service runtime. Persist progress and
+  // stop cleanly so a user can resume instead of losing a partial multi-GB file.
+  queued.toList().forEach{id->saveStatusPreservingProgress(id,"Paused: Android background time limit")}
+  queued.clear()
+  resumeWhenIdle.clear()
+  running.values.toList().forEach{task->
+   task.cancelled=true
+   task.connection?.disconnect()
+   saveStatusPreservingProgress(task.id,"Paused: Android background time limit")
+  }
+  if(Build.VERSION.SDK_INT>=24)stopForeground(STOP_FOREGROUND_REMOVE)
+  else stopForeground(true)
+  foreground=false
+  stopSelf()
+ }
  private fun saveStatus(id: Long, state: String, size: Long = -1, done: Long = 0,
                         speed: Long = 0, uri: String = "") {
   statuses.edit().putString(id.toString(), JSONObject().apply {
@@ -209,8 +243,17 @@ class DownloadService : Service() {
   return cm.getNetworkCapabilities(cm.activeNetwork)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)==true
  }
 
- private fun startTask(id: Long) {
+ @Synchronized private fun startTask(id: Long) {
   if(running.containsKey(id)) return
+  val maxActive=getSharedPreferences("web_settings",MODE_PRIVATE)
+   .getInt("parallel_downloads",2).coerceIn(1,3)
+  if(running.size>=maxActive){
+   queued.add(id)
+   saveStatusPreservingProgress(id,"Queued")
+   refreshNotification(true)
+   return
+  }
+  queued.remove(id)
   val raw = metadata.getString(id.toString(), null)
   if(raw == null) { stopIfIdle(); return }
   // Read both current U+001F metadata and older literal "\\u001f" entries.
@@ -272,10 +315,9 @@ class DownloadService : Service() {
    } finally {
     running.remove(id, task)
     if(resumeWhenIdle.remove(id) && metadata.contains(id.toString())){
-     startTask(id)
-    }else{
-     if(running.isEmpty())stopIfIdle() else refreshNotification(true)
+     queued.add(id)
     }
+    drainQueue()
    }
   }, "WebToApp-Download-" + id).start()
  }
