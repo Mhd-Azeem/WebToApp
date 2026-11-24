@@ -11,8 +11,9 @@ static func traffic_model(parent: Node3D,color: Color,kind := "sedan") -> Node3D
 		for node in copy.find_children("*","MeshInstance3D",true,false):
 			if node.has_meta("body_paint"): node.material_override=paint
 		return copy
-	var model := build(parent,color,kind)
-	for x in [-0.94,0.94]:
+	var compact := kind in ["motorcycle","tuk-tuk"]
+	var model := small_vehicle(parent,color,kind) if compact else build(parent,color,kind)
+	for x in ([] if compact else [-0.94,0.94]):
 		for z in [-1.3,1.3]:
 			var wheel_root := Node3D.new()
 			model.add_child(wheel_root)
@@ -182,3 +183,40 @@ static func wheel(w: Node3D,x: float) -> void:
 	var hub := G.box(w,Vector3(signf(x)*0.143,0,0),Vector3(0.03,0.07,0.07),chrome)
 	hub.rotation.x=PI/4
 
+
+static func small_vehicle(parent: Node3D, color: Color, kind: String) -> Node3D:
+	var model := Node3D.new()
+	parent.add_child(model)
+	var paint := G.material("",color)
+	model.set_meta("paint_material",paint)
+	var trim := G.material("",Color(0.07,0.09,0.10))
+	var tuk := kind=="tuk-tuk"
+	var rim := G.material("",Color(0.55,0.60,0.61))
+	var tires := [Vector3(0,0.4,0.82)]
+	if tuk:
+		tires.append_array([Vector3(-0.52,0.4,-0.70),Vector3(0.52,0.4,-0.70)])
+		G.box(model,Vector3(0,0.56,-0.18),Vector3(1.25,0.29,1.74),paint)
+		G.box(model,Vector3(0,1.75,-0.18),Vector3(1.31,0.15,1.81),trim)
+		G.box(model,Vector3(0,0.95,-0.76),Vector3(1.22,0.65,0.15),paint)
+		for side in [-0.56,0.56]:
+			for z in [-0.92,0.57]: G.box(model,Vector3(side,1.25,z),Vector3(0.055,1.0,0.055),rim)
+	else:
+		tires.append(Vector3(0,0.4,-0.84))
+		G.box(model,Vector3(0,0.73,0.16),Vector3(0.37,0.38,0.72),paint)
+		G.box(model,Vector3(0,0.91,-0.39),Vector3(0.37,0.15,0.66),trim)
+	G.box(model,Vector3(0,0.80,0.69),Vector3(0.13,0.85,0.12),rim).rotation.x=-0.18
+	G.box(model,Vector3(0,1.16,0.62),Vector3(0.62,0.06,0.085),trim)
+	G.box(model,Vector3(0,0.99,0.84),Vector3(0.24,0.16,0.08),G.material("",Color(0.92,0.90,0.75)))
+	for pos: Vector3 in tires:
+		var tire := MeshInstance3D.new()
+		var disc := CylinderMesh.new()
+		disc.top_radius=0.30
+		disc.bottom_radius=0.30
+		disc.height=0.16
+		disc.radial_segments=12
+		tire.mesh=disc
+		tire.position=pos
+		tire.rotation.z=PI/2
+		tire.material_override=trim
+		model.add_child(tire)
+	return model

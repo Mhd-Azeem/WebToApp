@@ -19,6 +19,7 @@ var lanes: Array[float] = []
 var pass_time: Array[float] = []
 var passing: Array[bool] = []
 var audio: AudioStreamPlayer3D
+var recycle_cooldown := 0.0
 var sound_elapsed := 0.0
 var sound_gain := 0.65
 
@@ -124,13 +125,20 @@ static func _left(direction: Vector3) -> Vector3:
 	return Vector3(direction.z,0,-direction.x)
 
 func _physics_process(delta: float) -> void:
+	recycle_cooldown -= delta
+	var refresh := recycle_cooldown <= 0
+	if refresh: recycle_cooldown = 1.0
 	var closest := -1
 	var nearest_distance := 45.0
 	for i in range(density):
 		var body := vehicles[i]
 		var distance := body.position.distance_to(player.position) if is_instance_valid(player) else 0.0
-		if distance > 300:
-			_recycle(i)
+		if distance > 300 or not body.visible:
+			if refresh:
+				_recycle(i)
+				var active := not is_instance_valid(player) or body.position.distance_to(player.position) <= 300.0
+				body.visible=active
+				body.collision_layer=2 if active else 0
 			continue
 		if distance < nearest_distance:
 			closest = i
@@ -165,7 +173,7 @@ func _drive(i: int, delta: float) -> void:
 	var gap_ahead := INF
 	var pass_clear := true
 	for j in range(density):
-		if j==i: continue
+		if j==i or not vehicles[j].visible: continue
 		var offset := vehicles[j].position-body.position
 		var ahead := offset.dot(heading)
 		var lateral := (vehicles[j].position-start).dot(side)

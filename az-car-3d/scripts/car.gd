@@ -29,6 +29,7 @@ var damage_enabled := false
 var previous_velocity := Vector3.ZERO
 var recovery_point := Vector3(-3.5,1.0,120)
 var recovery_heading := PI
+var road_navigation: RefCounted
 var recovery_elapsed := 0.0
 var fuel_exhausted := false
 var turn_signal := 0
@@ -149,6 +150,11 @@ func apply_appearance(paint: Color, rims: Color) -> void:
 	rim_material.albedo_color=rims
 
 func recover() -> void:
+	if road_navigation != null:
+		var pose: Dictionary=road_navigation.recovery_pose(global_position,get_world_3d().direct_space_state,get_rid())
+		if not pose.is_empty():
+			recovery_point=pose.point
+			recovery_heading=pose.heading
 	_reset_motion(recovery_point, recovery_heading)
 	if fuel_exhausted: transmission.start_stop()
 

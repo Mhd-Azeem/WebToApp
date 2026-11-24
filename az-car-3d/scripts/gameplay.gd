@@ -21,6 +21,7 @@ var nearby := -1
 
 func setup(layer: CanvasLayer, vehicle: VehicleBody3D) -> void:
 	car = vehicle
+	car.road_navigation=navigation
 	progress.load_from()
 	_apply_vehicle()
 	map=Minimap.new()

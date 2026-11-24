@@ -74,3 +74,27 @@ func _nearest(position_3d: Vector3) -> Dictionary:
 			result={"edge":link,"point":point}
 			best=distance
 	return result
+
+func recovery_pose(origin: Vector3, space: PhysicsDirectSpaceState3D, exclude: RID) -> Dictionary:
+	var nearest := _nearest(origin)
+	var edge: Vector2i=nearest.edge
+	var direction := (points[edge.y]-points[edge.x]).normalized()
+	var side := Vector3(direction.z,0,-direction.x).normalized()
+	for shift in [0.0, 9.0, -9.0, 18.0, -18.0]:
+		for lane in [1.0,-1.0]:
+			var point: Vector3=nearest.point+side*(3.4*lane)+direction*shift
+			var query := PhysicsRayQueryParameters3D.create(point+Vector3.UP*3.0,point-Vector3.UP*2.0,1)
+			query.exclude=[exclude]
+			var hit:=space.intersect_ray(query)
+			if hit.is_empty() or hit.collider.get_meta("surface","")!="asphalt": continue
+			var hull:=BoxShape3D.new()
+			hull.size=Vector3(2.2,1.8,4.8)
+			var angle:=atan2(direction.x*lane,direction.z*lane)
+			var clearance:=PhysicsShapeQueryParameters3D.new()
+			clearance.shape=hull
+			clearance.transform=Transform3D(Basis(Vector3.UP,angle),hit.position+Vector3.UP*1.25)
+			clearance.collision_mask=3
+			clearance.exclude=[exclude]
+			if space.intersect_shape(clearance,1).is_empty():
+				return {"point":hit.position+Vector3.UP*0.9,"heading":angle}
+	return {}

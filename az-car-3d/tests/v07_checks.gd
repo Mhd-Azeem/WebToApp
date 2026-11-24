@@ -76,9 +76,10 @@ func run() -> void:
 	await process_frame
 	await process_frame
 	check(scene.camera.global_position.distance_to(scene.car.global_position)>2.5,"Orbit camera tracks the car")
-	scene.car.recovery_point=Vector3(-3.5,1,60)
+	scene.car.position=Vector3(9,1,62)
+	scene.car.recovery_point=Vector3(-3.5,1,120)
 	scene.car.recover()
-	check(scene.car.position.is_equal_approx(Vector3(-3.5,1,60)),"Recovery restores the recorded asphalt checkpoint")
+	check(absf(scene.car.position.x)<6 and absf(scene.car.position.z-62)<19,"Recovery selects a supported clear lane near the vehicle")
 	scene.desktop_mode=false
 	scene.steering_selector.select(1)
 	await process_frame
