@@ -55,6 +55,7 @@ class DownloadService : Service() {
  // Queue the request, then resume only after its file descriptor has closed.
  private val resumeWhenIdle = ConcurrentHashMap.newKeySet<Long>()
  private val queued = ConcurrentHashMap.newKeySet<Long>()
+ private val queueOrder = java.util.concurrent.ConcurrentLinkedQueue<Long>()
  private val metadata by lazy { getSharedPreferences("resumable_transfers", MODE_PRIVATE) }
  private val statuses by lazy { getSharedPreferences("transfer_status", MODE_PRIVATE) }
  private val targets by lazy { getSharedPreferences("transfer_targets", MODE_PRIVATE) }
@@ -199,9 +200,9 @@ class DownloadService : Service() {
  @Synchronized private fun drainQueue(){
   val maxActive=getSharedPreferences("web_settings",MODE_PRIVATE)
    .getInt("parallel_downloads",2).coerceIn(1,3)
-  while(running.size<maxActive && queued.isNotEmpty()){
-   val id=queued.firstOrNull()?:break
-   queued.remove(id)
+  while(running.size<maxActive && queueOrder.isNotEmpty()){
+   val id=queueOrder.poll()?:break
+   if(!queued.remove(id))continue
    if(metadata.contains(id.toString()))startTask(id)
   }
   if(running.isEmpty())stopIfIdle() else refreshNotification(true)
@@ -211,6 +212,7 @@ class DownloadService : Service() {
   // stop cleanly so a user can resume instead of losing a partial multi-GB file.
   queued.toList().forEach{id->saveStatusPreservingProgress(id,"Paused: Android background time limit")}
   queued.clear()
+  queueOrder.clear()
   resumeWhenIdle.clear()
   running.values.toList().forEach{task->
    task.cancelled=true
@@ -224,8 +226,10 @@ class DownloadService : Service() {
  }
  private fun saveStatus(id: Long, state: String, size: Long = -1, done: Long = 0,
                         speed: Long = 0, uri: String = "") {
+  val previous=try{JSONObject(statuses.getString(id.toString(),"{}")?:"{}")}catch(_:Exception){JSONObject()}
+  val actualSize=if(size>=0)size else previous.optLong("size",-1L)
   statuses.edit().putString(id.toString(), JSONObject().apply {
-   put("state", state); put("size", size); put("done", done)
+   put("state", state); put("size", actualSize); put("done", done)
    put("speed", speed); put("uri", uri)
   }.toString()).apply()
  }
@@ -248,7 +252,7 @@ class DownloadService : Service() {
   val maxActive=getSharedPreferences("web_settings",MODE_PRIVATE)
    .getInt("parallel_downloads",2).coerceIn(1,3)
   if(running.size>=maxActive){
-   queued.add(id)
+   if(queued.add(id))queueOrder.offer(id)
    saveStatusPreservingProgress(id,"Queued")
    refreshNotification(true)
    return
@@ -316,7 +320,7 @@ class DownloadService : Service() {
    } finally {
     running.remove(id, task)
     if(resumeWhenIdle.remove(id) && metadata.contains(id.toString())){
-     queued.add(id)
+     if(queued.add(id))queueOrder.offer(id)
     }
     drainQueue()
    }
