@@ -75,6 +75,14 @@ class MainActivity:AppCompatActivity(){
   @Volatile var state:String="Paused",@Volatile var size:Long=-1,@Volatile var done:Long=0,
   @Volatile var speed:Long=0,@Volatile var stop:Boolean=false,@Volatile var uri:String="")
  private val transfers=ConcurrentHashMap<Long,Transfer>()
+ // A newly clicked link always creates a new transfer (0 bytes); only the
+ // existing entry's Pause/Resume buttons reuse its ID and saved partial file.
+ private fun newTransferId():Long{
+  var id=System.currentTimeMillis()
+  val history=getSharedPreferences("resumable_transfers",MODE_PRIVATE)
+  while(transfers.containsKey(id)||history.contains(id.toString()))id++
+  return id
+ }
  private fun persistTransfer(t:Transfer){
   getSharedPreferences("resumable_transfers",MODE_PRIVATE).edit().putString(t.id.toString(),
    listOf(t.url,t.filename,t.mime,t.agent,t.cookie,t.referer).joinToString(31.toChar().toString())).apply()
@@ -551,7 +559,7 @@ class MainActivity:AppCompatActivity(){
      }
     }
     val filename=URLUtil.guessFileName(url,disposition,mime)
-    val id=System.currentTimeMillis()
+    val id=newTransferId()
     val transfer=Transfer(id,url,filename,mime?: "",agent?:w.settings.userAgentString,
      CookieManager.getInstance().getCookie(url)?:"",w.url?:"")
     transfers[id]=transfer
@@ -910,8 +918,7 @@ class MainActivity:AppCompatActivity(){
    else->"application/octet-stream"
   }
   val name=URLUtil.guessFileName(video.url,"",mime)
-  var id=System.currentTimeMillis()
-  while(transfers.containsKey(id))id++
+  val id=newTransferId()
   val transfer=Transfer(id,video.url,name,mime,
    page.settings.userAgentString?:"",CookieManager.getInstance().getCookie(video.url)?:"",page.url?:"")
   transfers[id]=transfer
