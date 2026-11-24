@@ -58,7 +58,7 @@ class MainActivity:AppCompatActivity(){
  private lateinit var currentUrlLabel:TextView
  private lateinit var addressBarView:LinearLayout
  private var chromeVisible=true
- private var chromeAnimator:android.animation.ValueAnimator?=null
+ private var lastChromeTransitionAt=0L
  private var dockExpanded=true
  private var controlsExpanded=false
  private val collapseControls=Runnable{setControlsExpanded(false)}
@@ -158,7 +158,7 @@ class MainActivity:AppCompatActivity(){
   saved.all.forEach{(key,value)->key.toLongOrNull()?.let{id->if(value is String)downloads[id]=Pair(value,SystemClock.elapsedRealtime())}}
 
   // Generated app chrome: immersive WebView, AMOLED address bar, collapsible dock.
-  val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setBackgroundColor(Color.BLACK)}
+  val root=FrameLayout(this).apply{setBackgroundColor(Color.BLACK)}
   val addressBar=LinearLayout(this).apply{
    orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL
    setPadding(13.dp(),6.dp(),13.dp(),6.dp());setBackgroundColor(Color.BLACK)
@@ -195,12 +195,15 @@ class MainActivity:AppCompatActivity(){
    setOnClickListener{setControlsExpanded(!controlsExpanded)}
   }
   addressBar.addView(addressMenu,LinearLayout.LayoutParams(38.dp(),44.dp()))
-  root.addView(addressBar,LinearLayout.LayoutParams(-1,56.dp()))
   addressBarView=addressBar
-
+  // Keep the WebView's measured size constant while chrome is animated.
+  // Resizing the address bar during a scroll used to create a feedback loop:
+  // WebView scroll changes -> chrome height changes -> more scroll callbacks.
   val overlay=FrameLayout(this)
   container=FrameLayout(this)
   overlay.addView(container,FrameLayout.LayoutParams(-1,-1))
+  container.translationY=56.dp().toFloat()
+  overlay.addView(addressBar,FrameLayout.LayoutParams(-1,56.dp(),android.view.Gravity.TOP))
   val controls=LinearLayout(this).apply{
    orientation=LinearLayout.VERTICAL
    setPadding(14.dp(),16.dp(),14.dp(),14.dp())
@@ -318,7 +321,7 @@ class MainActivity:AppCompatActivity(){
   overlay.addView(floatingHandle,FrameLayout.LayoutParams(58.dp(),48.dp(),android.view.Gravity.BOTTOM or android.view.Gravity.END).apply{
    bottomMargin=22.dp();rightMargin=16.dp()
   })
-  root.addView(overlay,LinearLayout.LayoutParams(-1,0,1f))
+  root.addView(overlay,FrameLayout.LayoutParams(-1,-1))
   setContentView(root)
   ViewCompat.setOnApplyWindowInsetsListener(root){view,insets->
    val bars=insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -488,15 +491,20 @@ class MainActivity:AppCompatActivity(){
   var scrollDistance=0
   var previousDirection=0
   w.setOnScrollChangeListener{_,_,scrollY,_,oldScrollY->
-   if(tabs.getOrNull(active)===w&&!controlsExpanded){
+   if(tabs.getOrNull(active)===w&&!controlsExpanded&&fullscreenCustomView==null){
     val delta=scrollY-oldScrollY
-    if(scrollY<=2){scrollDistance=0;setChromeVisible(true)}
-    else if(kotlin.math.abs(delta)>1){
+    val now=SystemClock.elapsedRealtime()
+    if(scrollY<=2){
+     scrollDistance=0;previousDirection=0
+     if(now-lastChromeTransitionAt>450L)setChromeVisible(true)
+    }else if(kotlin.math.abs(delta)>=3){
      val direction=if(delta>0)1 else -1
-     if(direction!=previousDirection)scrollDistance=0
-     previousDirection=direction
+     if(direction!=previousDirection){scrollDistance=0;previousDirection=direction}
      scrollDistance+=kotlin.math.abs(delta)
-     if(scrollDistance>=24.dp()){
+     // Hysteresis prevents a finger's small direction changes from
+     // repeatedly toggling top and bottom bars on the same scroll.
+     val threshold=if(direction>0)64.dp() else 82.dp()
+     if(scrollDistance>=threshold && now-lastChromeTransitionAt>450L){
       setChromeVisible(direction<0)
       scrollDistance=0
      }
@@ -637,37 +645,47 @@ class MainActivity:AppCompatActivity(){
  private fun setChromeVisible(visible:Boolean){
   if(chromeVisible==visible)return
   chromeVisible=visible
+  lastChromeTransitionAt=SystemClock.elapsedRealtime()
   if(!visible)setControlsExpanded(false)
+  val duration=260L
   if(::addressBarView.isInitialized){
-   chromeAnimator?.cancel()
-   val startHeight=addressBarView.layoutParams.height
-   val fullHeight=56.dp()
-   chromeAnimator=android.animation.ValueAnimator.ofInt(startHeight,if(visible)fullHeight else 0).apply{
-    duration=230L
-    interpolator=android.view.animation.DecelerateInterpolator()
-    addUpdateListener{animation->
-     val height=animation.animatedValue as Int
-     addressBarView.layoutParams=addressBarView.layoutParams.apply{this.height=height}
-     addressBarView.alpha=(height.toFloat()/fullHeight).coerceIn(0f,1f)
-    }
-    start()
-   }
+   // Animate translation/opacity only. Never remeasure WebView on each frame.
+   addressBarView.animate().cancel()
+   if(visible)addressBarView.visibility=View.VISIBLE
+   addressBarView.animate()
+    .translationY(if(visible)0f else -56.dp().toFloat())
+    .alpha(if(visible)1f else 0f)
+    .setDuration(duration)
+    .setInterpolator(android.view.animation.DecelerateInterpolator())
+    .withEndAction{
+     if(!chromeVisible)addressBarView.visibility=View.GONE
+    }.start()
+  }
+  if(::container.isInitialized){
+   // Move the entire fixed-size WebView frame beneath the top chrome.
+   // Translation does not change the webpage's scrollY or trigger a relayout.
+   container.animate().cancel()
+   container.animate()
+    .translationY(if(visible)56.dp().toFloat() else 0f)
+    .setDuration(duration)
+    .setInterpolator(android.view.animation.DecelerateInterpolator())
+    .start()
   }
   if(::floatingDock.isInitialized){
    val showDock=visible&&dockExpanded
    floatingDock.animate().cancel()
    if(showDock)floatingDock.visibility=View.VISIBLE
    floatingDock.animate().translationY(if(showDock)0f else 100.dp().toFloat())
-    .alpha(if(showDock)1f else 0f).setDuration(230L)
-    .withEndAction{if(!showDock)floatingDock.visibility=View.GONE}.start()
+    .alpha(if(showDock)1f else 0f).setDuration(duration)
+    .withEndAction{if(!chromeVisible)floatingDock.visibility=View.GONE}.start()
   }
   if(::floatingHandle.isInitialized){
    val showHandle=visible&&!dockExpanded&&!controlsExpanded
    floatingHandle.animate().cancel()
    if(showHandle)floatingHandle.visibility=View.VISIBLE
    floatingHandle.animate().translationY(if(showHandle)0f else 85.dp().toFloat())
-    .alpha(if(showHandle)1f else 0f).setDuration(230L)
-    .withEndAction{if(!showHandle)floatingHandle.visibility=View.GONE}.start()
+    .alpha(if(showHandle)1f else 0f).setDuration(duration)
+    .withEndAction{if(!chromeVisible)floatingHandle.visibility=View.GONE}.start()
   }
  }
  private fun updateAddressBar(){
