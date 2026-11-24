@@ -997,50 +997,107 @@ class MainActivity:AppCompatActivity(){
   heading.text="‹     Downloads"
   heading.setOnClickListener{dialog.dismiss()}
   val samples=mutableMapOf<Long,ArrayDeque<Pair<Long,Long>>>()
+  // Rendered cards remain attached. Progress/status text updates in place.
+  val transferList=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
+  val otherList=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
+  list.addView(transferList)
+  list.addView(otherList)
+  data class TransferTile(
+   val card:LinearLayout,val info:TextView,val bar:ProgressBar,
+   val speedText:TextView,val actions:LinearLayout,var mode:String=""
+  )
+  val tiles=linkedMapOf<Long,TransferTile>()
+  var visualOrder=emptyList<Long>()
   val refresh=object:Runnable{
    override fun run(){
     if(!dialog.isShowing)return
     refreshTransfers()
-    list.removeAllViews()
-    transfers.values.sortedByDescending{it.id}.forEach{t->
-     val card=LinearLayout(this@MainActivity).apply{
-      orientation=LinearLayout.VERTICAL;setPadding(16.dp(),14.dp(),16.dp(),14.dp())
-      background=rounded(0xff151E21.toInt(),18)
+    val sorted=transfers.values.sortedByDescending{it.id}
+    val orderedIds=sorted.map{it.id}
+    tiles.keys.toList().filter{!orderedIds.contains(it)}.forEach{tiles.remove(it)}
+    sorted.forEach{t->
+     if(!tiles.containsKey(t.id)){
+      val card=LinearLayout(this@MainActivity).apply{
+       orientation=LinearLayout.VERTICAL;setPadding(16.dp(),14.dp(),16.dp(),14.dp())
+       background=rounded(0xff151E21.toInt(),18)
+      }
+      card.addView(TextView(this@MainActivity).apply{
+       text=t.filename;setTextColor(Color.WHITE);textSize=16f;maxLines=2
+      })
+      val info=TextView(this@MainActivity).apply{setTextColor(0xffADBDC1.toInt());textSize=13f}
+      val bar=ProgressBar(this@MainActivity,null,android.R.attr.progressBarStyleHorizontal).apply{max=100}
+      val speed=TextView(this@MainActivity).apply{setTextColor(0xff00E5EE.toInt());textSize=12f}
+      val actions=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.HORIZONTAL}
+      card.addView(info);card.addView(bar);card.addView(speed);card.addView(actions)
+      tiles[t.id]=TransferTile(card,info,bar,speed,actions)
      }
-     card.addView(TextView(this@MainActivity).apply{text=t.filename;setTextColor(Color.WHITE);textSize=16f})
-     val pct=if(t.size>0)(t.done*100/t.size).toInt().coerceIn(0,100) else 0
-     card.addView(TextView(this@MainActivity).apply{
-      text="${t.state} • ${pretty(t.done)} / ${if(t.size>0)pretty(t.size) else "Unknown"}"
-      setTextColor(0xffADBDC1.toInt());textSize=13f
-     })
-     card.addView(ProgressBar(this@MainActivity,null,android.R.attr.progressBarStyleHorizontal).apply{
-      isIndeterminate=t.size<=0&&(t.state=="Downloading"||t.state=="Connecting"||t.state.startsWith("Retrying"));max=100;progress=pct
-     })
-     val eta=if(t.speed>0&&t.size>t.done)" • ${duration((t.size-t.done)/t.speed)} remaining" else ""
-     card.addView(TextView(this@MainActivity).apply{
-      text=if(t.state=="Downloading"&&t.speed>0)"${pretty(t.speed)}/s$eta" else if(t.state=="Downloading"||t.state=="Connecting")"Waiting for server…" else t.state
-      setTextColor(0xff00E5EE.toInt());textSize=12f
-     })
-     val actions=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.HORIZONTAL}
-     if(t.state=="Downloading"||t.state=="Connecting"||t.state.startsWith("Retrying")||t.state=="Saving file"){
-      actions.addView(TextView(this@MainActivity).apply{text="Ⅱ Pause";styleDownloadAction(this,0);setOnClickListener{pauseTransfer(t)}})
-     }else if(t.state.startsWith("Paused")||t.state.startsWith("Failed")){
-      actions.addView(TextView(this@MainActivity).apply{text="▶ Resume";styleDownloadAction(this,1);setOnClickListener{startTransfer(t)}})
+     val tile=tiles[t.id]?:return@forEach
+     val percent=if(t.size>0)(t.done*100/t.size).toInt().coerceIn(0,100) else 0
+     val desc=t.state+" • "+pretty(t.done)+" / "+(if(t.size>0)pretty(t.size) else "Unknown")
+     if(tile.info.text.toString()!=desc)tile.info.text=desc
+     val indeterminate=t.size<=0 && (t.state=="Downloading" || t.state=="Connecting" ||
+      t.state.startsWith("Retrying") || t.state=="Queued")
+     if(tile.bar.isIndeterminate!=indeterminate)tile.bar.isIndeterminate=indeterminate
+     if(!indeterminate && tile.bar.progress!=percent)tile.bar.progress=percent
+     val eta=if(t.speed>0&&t.size>t.done)" • "+duration((t.size-t.done)/t.speed)+" remaining" else ""
+     val speedLabel=when {
+      t.state=="Downloading"&&t.speed>0->pretty(t.speed)+"/s"+eta
+      t.state=="Queued"->"Waiting for a free download slot"
+      t.state=="Verifying"->"Checking file integrity…"
+      t.state=="Saving file"->"Finishing saved file…"
+      t.state=="Downloading"||t.state=="Connecting"->"Waiting for server…"
+      else->t.state
      }
-     if(t.state=="Completed"&&t.uri.startsWith("content://")){
-      actions.addView(TextView(this@MainActivity).apply{text=if(isVideoFile(t.filename,t.mime))"▶ Play" else "Open";styleDownloadAction(this,1);setOnClickListener{
-       openDownloadedFile(Uri.parse(t.uri),t.filename,t.mime)
-      }})
+     if(tile.speedText.text.toString()!=speedLabel)tile.speedText.text=speedLabel
+     val mode=when {
+      t.state=="Completed"->"completed"
+      t.state.startsWith("Failed")||t.state.startsWith("Paused")->"resume"
+      t.state=="Queued"->"queued"
+      else->"active"
      }
-     actions.addView(TextView(this@MainActivity).apply{text="× Remove";styleDownloadAction(this,2);setOnClickListener{removeTransfer(t)}})
-     for(i in 0 until actions.childCount){
-      actions.getChildAt(i).layoutParams=LinearLayout.LayoutParams(-2,44.dp()).apply{marginEnd=9.dp()}
+     if(mode!=tile.mode){
+      tile.actions.removeAllViews()
+      if(mode=="active"||mode=="queued"){
+       tile.actions.addView(TextView(this@MainActivity).apply{
+        text="Ⅱ Pause";styleDownloadAction(this,0);setOnClickListener{pauseTransfer(t)}
+       })
+      }else if(mode=="resume"){
+       tile.actions.addView(TextView(this@MainActivity).apply{
+        text="▶ Resume";styleDownloadAction(this,1);setOnClickListener{startTransfer(t)}
+       })
+      }else if(mode=="completed"&&t.uri.startsWith("content://")){
+       tile.actions.addView(TextView(this@MainActivity).apply{
+        text=if(isVideoFile(t.filename,t.mime))"▶ Play" else "Open"
+        styleDownloadAction(this,1)
+        setOnClickListener{openDownloadedFile(Uri.parse(t.uri),t.filename,t.mime)}
+       })
+      }
+      tile.actions.addView(TextView(this@MainActivity).apply{
+       text="× Remove";styleDownloadAction(this,2);setOnClickListener{removeTransfer(t)}
+      })
+      for(i in 0 until tile.actions.childCount){
+       tile.actions.getChildAt(i).layoutParams=LinearLayout.LayoutParams(-2,44.dp())
+        .apply{marginEnd=9.dp()}
+      }
+      tile.mode=mode
      }
-     card.addView(actions)
-     list.addView(card,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=10.dp()})
     }
+    if(visualOrder!=orderedIds){
+     transferList.removeAllViews()
+     sorted.forEach{t->
+      tiles[t.id]?.let{tile->
+       transferList.addView(tile.card,LinearLayout.LayoutParams(-1,-2)
+        .apply{bottomMargin=10.dp()})
+      }
+     }
+     visualOrder=orderedIds
+    }
+    otherList.removeAllViews()
     if(downloads.isEmpty()&&transfers.isEmpty()){
-     list.addView(TextView(this@MainActivity).apply{text="No downloads yet";setTextColor(Color.LTGRAY);textSize=16f;setPadding(12.dp(),28.dp(),12.dp(),28.dp())})
+     otherList.addView(TextView(this@MainActivity).apply{
+      text="No downloads yet";setTextColor(Color.LTGRAY);textSize=16f
+      setPadding(12.dp(),28.dp(),12.dp(),28.dp())
+     })
     }
     var activeHeader=false
     var historyHeader=false
@@ -1080,10 +1137,10 @@ class MainActivity:AppCompatActivity(){
        val isHistory=status==DownloadManager.STATUS_SUCCESSFUL||status==DownloadManager.STATUS_FAILED
        if(isHistory&&!historyHeader){
         historyHeader=true
-        list.addView(TextView(this@MainActivity).apply{text="HISTORY";textSize=13f;setTextColor(0xff00E5EE.toInt());setPadding(8.dp(),16.dp(),8.dp(),10.dp())})
+        otherList.addView(TextView(this@MainActivity).apply{text="HISTORY";textSize=13f;setTextColor(0xff00E5EE.toInt());setPadding(8.dp(),16.dp(),8.dp(),10.dp())})
        }else if(!isHistory&&!activeHeader){
         activeHeader=true
-        list.addView(TextView(this@MainActivity).apply{text="ACTIVE DOWNLOADS";textSize=13f;setTextColor(0xff00E5EE.toInt());setPadding(8.dp(),10.dp(),8.dp(),10.dp())})
+        otherList.addView(TextView(this@MainActivity).apply{text="ACTIVE DOWNLOADS";textSize=13f;setTextColor(0xff00E5EE.toInt());setPadding(8.dp(),10.dp(),8.dp(),10.dp())})
        }
        val card=LinearLayout(this@MainActivity).apply{
         orientation=LinearLayout.VERTICAL
@@ -1120,7 +1177,7 @@ class MainActivity:AppCompatActivity(){
       actions.getChildAt(i).layoutParams=LinearLayout.LayoutParams(-2,44.dp()).apply{marginEnd=9.dp()}
      }
      card.addView(actions)
-       list.addView(card,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=10.dp()})
+       otherList.addView(card,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=10.dp()})
       }
      }
     }
@@ -1189,6 +1246,26 @@ class MainActivity:AppCompatActivity(){
   row("Download history","Active, completed and failed downloads"){dialog.dismiss();showDownloads()}
   toggle("Wi-Fi only downloads","wifi_only")
   toggle("Download notifications","download_notifications",true)
+  row("Parallel downloads","Maximum active file transfers"){
+   val choices=arrayOf("1 at a time — safest","2 at a time — balanced","3 at a time — faster for small files")
+   val current=prefs.getInt("parallel_downloads",2).coerceIn(1,3)-1
+   AlertDialog.Builder(this).setTitle("Simultaneous downloads")
+    .setSingleChoiceItems(choices,current){dialog,index->
+     prefs.edit().putInt("parallel_downloads",index+1).apply()
+     Toast.makeText(this,"Download limit updated",Toast.LENGTH_SHORT).show()
+     dialog.dismiss()
+    }.setNegativeButton("Cancel",null).show()
+  }
+  row("Download speed limit","Unlimited / 512 KB/s / 2 MB/s / 5 MB/s"){
+   val choices=arrayOf("Unlimited","512 KB/s","2 MB/s","5 MB/s")
+   val values=intArrayOf(0,512,2048,5120)
+   val current=values.indexOf(prefs.getInt("download_speed_kib",0)).coerceAtLeast(0)
+   AlertDialog.Builder(this).setTitle("Per-download speed limit")
+    .setSingleChoiceItems(choices,current){dialog,index->
+     prefs.edit().putInt("download_speed_kib",values[index]).apply()
+     dialog.dismiss()
+    }.setNegativeButton("Cancel",null).show()
+  }
   row("Download location","Android Downloads folder"){}
   row("Storage usage","Android app storage settings"){
    startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:$packageName")))
