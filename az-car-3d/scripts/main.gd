@@ -114,8 +114,8 @@ func _ready() -> void:
 	wheel=interior.wheel
 	interior.visible=false
 	_hud()
-	traffic.set_enabled(settings.traffic_toggle.button_pressed)
 	_select_quality()
+	traffic.set_enabled(settings.traffic_toggle.button_pressed)
 	if settings.saved.get_value("driving","automatic",false): car.transmission.toggle(0)
 	settings.transmission_selector.select(car.transmission.mode)
 

@@ -1,7 +1,7 @@
 # v0.4 driving update
 
 Settings (gear icon next to the horn) provides saved traffic and performance
-toggles. Traffic is off by default. On enables eight simple vehicles following
+toggles. Traffic starts enabled. The graphics preset sets the number of vehicles following
 the connected left-side outer road loop, slowing for obstacles and the player.
 Off hides vehicles, removes their collision layer and stops their physics work.
 Traffic has no pathfinding, wheel solver, dynamic lights or individual audio.

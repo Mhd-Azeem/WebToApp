@@ -18,6 +18,15 @@ func world_test() -> void:
 	scene.car.transmission.mode=T.Mode.MANUAL
 	await physics_frame
 	await physics_frame
+	check(scene.traffic.enabled,"Traffic enabled on a fresh install")
+	for i in range(2):
+		var body: CharacterBody3D = scene.traffic.vehicles[i]
+		var kind := "sedan" if i == 0 else "truck"
+		var model := body.get_child(1)
+		check(model.get_meta("vehicle_type")==kind and model.is_visible_in_tree(),"Visible starting " + kind)
+		check(scene.camera.is_position_in_frustum(body.position+Vector3.UP),"Starting camera includes " + kind)
+	# Isolate the following drivetrain scenarios from ambient vehicles.
+	scene.settings.traffic_toggle.button_pressed=false
 	check(scene.car.wheels.size()==4,"Four physics wheels")
 	check(scene.car.global_position.x<0,"Car facing -Z starts on driver-left lane (-X)")
 	check(scene.shifter.position.y<560 and scene.shifter.position.x>990,"Shifter fixed above brake")
@@ -168,9 +177,10 @@ func world_test() -> void:
 	scene.settings.traffic_toggle.button_pressed=true
 	await physics_frame
 	await physics_frame
-	check(scene.traffic.enabled and scene.traffic.vehicles.size()==8,"Settings enables bounded traffic")
+	var active_traffic: Array = scene.traffic.vehicles.filter(func(body: Node3D): return body.visible)
+	check(scene.traffic.enabled and active_traffic.size()==8,"Settings enables bounded traffic")
 	var colors := {}
-	for body in scene.traffic.vehicles:
+	for body in active_traffic:
 		var models: Array = body.get_children().filter(func(child: Node): return child.has_meta("coupe"))
 		check(models.size()==1,"Traffic uses shared player coupe artwork")
 		if models.size()==1:

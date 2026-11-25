@@ -78,14 +78,14 @@ static func build(parent: Node3D, color: Color,kind := "sedan") -> Node3D:
 	var chrome := G.material("",Color(0.53,0.60,0.66))
 	chrome.metallic=0.85
 	chrome.roughness=0.27
+	if kind == "truck":
+		_box_truck(visual, paint, trim, chrome)
+		return visual
 	G.profile_mesh(visual,[[-2.17,0.79,0.48,0.75],[-1.98,0.98,0.47,0.96],[-1.40,1.0,0.44,1.02],[-0.70,0.94,0.46,1.04],[0.5,0.94,0.46,1.03],[1.20,1.0,0.44,0.98],[1.85,0.93,0.47,0.85],[2.22,0.82,0.49,0.77]],paint)
 	var glass := G.material("",Color(0.055,0.10,0.135))
 	glass.metallic=0.2
 	glass.roughness=0.16
-	if kind == "truck":
-		G.box(visual, Vector3(0,1.58,-0.76), Vector3(1.92,1.72,2.5), paint)
-		visual.scale.z = 1.22
-	elif kind == "motorcycle":
+	if kind == "motorcycle":
 		visual.scale = Vector3(0.31,0.69,0.48)
 	elif kind == "tuk-tuk":
 		visual.scale = Vector3(0.69,1.08,0.58)
@@ -95,7 +95,6 @@ static func build(parent: Node3D, color: Color,kind := "sedan") -> Node3D:
 	elif kind=="suv": height=1.78; rear=-1.65
 	elif kind=="van": height=2.02; rear=-1.90
 	elif kind=="bus": height=2.25; rear=-1.95
-	elif kind=="truck": height=2.25; rear=-0.35
 	elif kind=="motorcycle": height=1.18; rear=-0.15
 	elif kind=="tuk-tuk": height=1.74; rear=-1.90
 	G.profile_mesh(visual,[[-2.0,0.81,1.0,1.08],[rear,0.70,1.01,height],[0.10,0.71,1.01,height],[0.99,0.83,1.0,1.08]],glass)
@@ -152,6 +151,24 @@ static func build(parent: Node3D, color: Color,kind := "sedan") -> Node3D:
 	G.box(visual,Vector3(-0.42,1.15,0.6),Vector3(0.28,0.08,0.28),G.material("",Color(0.05,0.05,0.05)))
 
 	return visual
+
+static func _box_truck(root: Node3D, paint: Material, trim: Material, metal: Material) -> void:
+	var cargo := G.material("", Color("#c5c9c7"))
+	var glass := G.material("", Color("#334958"))
+	G.box(root, Vector3(0,0.56,0), Vector3(1.66,0.25,5.1), trim)
+	G.box(root, Vector3(0,1.66,-0.9), Vector3(2.0,1.84,3.40), cargo)
+	G.box(root, Vector3(0,1.13,1.70), Vector3(1.92,0.91,1.68), paint)
+	G.profile_mesh(root, [[0.90,0.94,1.55,2.32],[1.84,0.94,1.55,2.32],[2.45,0.88,1.55,1.84]], glass)
+	G.box(root, Vector3(0,2.34,1.38), Vector3(1.87,0.10,1.04), paint)
+	G.box(root, Vector3(0,0.76,2.56), Vector3(1.95,0.22,0.14), trim)
+	G.box(root, Vector3(0,1.12,2.55), Vector3(0.90,0.26,0.06), trim)
+	for side in [-1,1]:
+		G.box(root, Vector3(side*0.72,1.17,2.56), Vector3(0.33,0.19,0.07), cargo)
+		G.box(root, Vector3(side*1.02,1.86,1.94), Vector3(0.16,0.25,0.14), trim)
+		G.box(root, Vector3(side*0.38,1.63,-2.62), Vector3(0.04,1.62,0.05), metal)
+		G.box(root, Vector3(side*0.79,0.79,-2.62), Vector3(0.29,0.13,0.06), G.material("",Color("#a72722")))
+		for z in [-2.48,-1.72,-0.96,-0.20,0.66]:
+			G.box(root, Vector3(side*1.01,1.66,z), Vector3(0.04,1.83,0.045), metal)
 
 static func wheel(w: Node3D,x: float) -> void:
 	var trim := G.material("",Color(0.025,0.035,0.045))

@@ -76,7 +76,7 @@ kickdown, analog pedals, handbrake, RPM-synchronized layered audio and analog
 instruments in both hood and cockpit. See [drivetrain documentation](docs/DRIVETRAIN_SIMULATION.md)
 for controls, configuration, measured validation and simulation limits.
 
-Driving update: open the gear icon for saved traffic and performance settings. Traffic is off by default. Reverse shows a rear-camera inset. Gear limits are 40 / 60 / 80 / 120 / 220 km/h. See docs/DRIVING_UPDATE.md. Every successful branch build refreshes the az-car-3d-latest GitHub release APK.
+Driving update: open the gear icon for saved traffic and performance settings. Traffic starts enabled and remembers the saved switch. Reverse shows a rear-camera inset. Gear limits are 40 / 60 / 80 / 120 / 220 km/h. See docs/DRIVING_UPDATE.md. Every successful branch build refreshes the az-car-3d-latest GitHub release APK.
 
 v0.5 adds more sensitive steering, the player coupe in eight traffic colors,
 rolling terrain, hills, trees, shrubs, rocks, city parks, beach and sea. See

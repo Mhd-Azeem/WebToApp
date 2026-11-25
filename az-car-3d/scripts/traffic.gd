@@ -4,7 +4,8 @@ const Coupe = preload("res://scripts/coupe_visual.gd")
 const G = preload("res://scripts/geometry.gd")
 const Signals = preload("res://scripts/traffic_signal.gd")
 const Audio = preload("res://scripts/engine_audio.gd")
-const KINDS := ["sedan","hatchback","suv","van","bus","truck","motorcycle","tuk-tuk"]
+const KINDS := ["sedan","truck","suv","hatchback","bus","van","motorcycle","tuk-tuk"]
+const PAINT := ["95a5b1","37618a","514f49","a43e36","dfbd72","d4d6d1","323941","488679","743e43","778a92"]
 const MAIN_X := [-96.0, 0.0, 96.0]
 const LOOP_Z := [-960.0,-640.0,-320.0,-160.0,0.0,160.0,320.0,640.0,960.0]
 
@@ -70,7 +71,7 @@ func _populate() -> void:
 		shape.shape = bounds
 		shape.position.y = bounds.size.y * 0.5 + 0.05
 		body.add_child(shape)
-		var color := Color.from_hsv(float(i) / 10.0,0.70,0.82)
+		var color := Color.html(PAINT[i])
 		var model := Coupe.traffic_model(body,color,kind)
 		model.set_meta("vehicle_type",kind)
 		model.position.y = -0.10
@@ -94,16 +95,29 @@ func _recycle(index: int) -> void:
 	var x1: float = MAIN_X[0] if index%2==0 else MAIN_X[1]
 	var x2: float = MAIN_X[1] if index%2==0 else MAIN_X[2]
 	var corners := PackedVector3Array([Vector3(x1,0,north),Vector3(x2,0,north),Vector3(x2,0,south),Vector3(x1,0,south)])
-	if index%3==0: corners.reverse()
+	if index > 1 and index%3==0: corners.reverse()
 	routes[index] = corners
 	var preferred := index % 4
 	var position_3d := Vector3.ZERO
+	# Seed the two common vehicle classes on the closest parallel street.
+	var forward := player.transform.basis.z if is_instance_valid(player) else Vector3.FORWARD
+	if index < 2:
+		var best_distance := INF
+		for segment in range(4):
+			var a := corners[segment]
+			var b := corners[(segment+1)%4]
+			if a.x == b.x and absf(a.x-focus.x) < best_distance:
+				preferred = segment
+				best_distance = absf(a.x-focus.x)
 	for attempt in range(16):
 		var segment := (preferred + attempt) % 4
 		var a := corners[segment]
 		var b := corners[(segment+1)%4]
 		var direction := (b-a).normalized()
-		var progress := clampf((focus-a).dot(direction) + (42.0+14.0*floorf(index/4.0)) * (1 if attempt < 8 else -1), 14, a.distance_to(b)-14)
+		var lead := 42.0 + 14.0 * floorf(index/4.0)
+		if index < 2:
+			lead = (32.0 + index*22.0) * (1 if direction.dot(forward) >= 0 else -1)
+		var progress := clampf((focus-a).dot(direction) + lead * (1 if attempt < 8 else -1), 14, a.distance_to(b)-14)
 		position_3d = a + direction*progress + _left(direction)*4.6
 		targets[index] = (segment+1)%4
 		if position_3d.distance_to(focus)<28: continue

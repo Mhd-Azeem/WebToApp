@@ -89,7 +89,7 @@ func _ready() -> void:
 	shadow_toggle.button_pressed=saved.get_value("driving","shadows",false)
 	throttle_travel=saved.get_value("driving","throttle_travel",96.0)
 	sensitivity.value=throttle_travel
-	traffic_toggle.button_pressed=saved.get_value("driving","traffic",false)
+	traffic_toggle.button_pressed=saved.get_value("driving","traffic",true)
 	traffic_toggle.toggled.connect(func(value: bool):
 		_save("traffic",value)
 		traffic_changed.emit(value))

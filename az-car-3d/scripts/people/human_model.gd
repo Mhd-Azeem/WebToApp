@@ -6,7 +6,7 @@ var animations: AnimationPlayer
 var hair_attachment: BoneAttachment3D
 
 func dress(model_index: int, tint := Color.WHITE, hairstyle := -1) -> void:
-	var previous := animations.current_animation if is_instance_valid(animations) else "Idle"
+	var previous: StringName = animations.current_animation if is_instance_valid(animations) else "Idle"
 	for child in get_children(): child.free()
 	var model := (load(MODELS[clampi(model_index,0,1)]) as PackedScene).instantiate() as Node3D
 	add_child(model)
